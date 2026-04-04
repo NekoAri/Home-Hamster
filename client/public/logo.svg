@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#a855f7"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </radialGradient>
+    <radialGradient id="bodyGrad" cx="45%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#f5d0a0"/>
+      <stop offset="100%" stop-color="#e8b070"/>
+    </radialGradient>
+    <radialGradient id="bellyGrad" cx="50%" cy="40%" r="55%">
+      <stop offset="0%" stop-color="#fff3e0"/>
+      <stop offset="100%" stop-color="#fde0bc"/>
+    </radialGradient>
+    <radialGradient id="earInnerGrad" cx="50%" cy="60%" r="55%">
+      <stop offset="0%" stop-color="#f48fb1"/>
+      <stop offset="100%" stop-color="#e91e8c"/>
+    </radialGradient>
+  </defs>
+
+  <!-- 圆形背景 -->
+  <circle cx="256" cy="256" r="256" fill="url(#bgGrad)"/>
+
+  <!-- 耳朵（左） -->
+  <ellipse cx="165" cy="155" rx="48" ry="58" fill="#e8b070"/>
+  <ellipse cx="165" cy="160" rx="28" ry="36" fill="url(#earInnerGrad)"/>
+
+  <!-- 耳朵（右） -->
+  <ellipse cx="347" cy="155" rx="48" ry="58" fill="#e8b070"/>
+  <ellipse cx="347" cy="160" rx="28" ry="36" fill="url(#earInnerGrad)"/>
+
+  <!-- 身体 -->
+  <ellipse cx="256" cy="340" rx="110" ry="100" fill="url(#bodyGrad)"/>
+
+  <!-- 头部 -->
+  <circle cx="256" cy="242" r="120" fill="url(#bodyGrad)"/>
+
+  <!-- 腹部白色区域 -->
+  <ellipse cx="256" cy="360" rx="75" ry="70" fill="url(#bellyGrad)"/>
+
+  <!-- 腮帮子（左）- 储粮特征 -->
+  <ellipse cx="178" cy="268" rx="42" ry="36" fill="#f5c08a" opacity="0.85"/>
+  <!-- 腮帮子（右） -->
+  <ellipse cx="334" cy="268" rx="42" ry="36" fill="#f5c08a" opacity="0.85"/>
+
+  <!-- 眼睛（左） -->
+  <circle cx="216" cy="228" r="22" fill="#2d1a0e"/>
+  <circle cx="216" cy="228" r="14" fill="#1a0a05"/>
+  <circle cx="222" cy="220" r="6" fill="white"/>
+  <circle cx="214" cy="230" r="3" fill="white" opacity="0.6"/>
+
+  <!-- 眼睛（右） -->
+  <circle cx="296" cy="228" r="22" fill="#2d1a0e"/>
+  <circle cx="296" cy="228" r="14" fill="#1a0a05"/>
+  <circle cx="302" cy="220" r="6" fill="white"/>
+  <circle cx="294" cy="230" r="3" fill="white" opacity="0.6"/>
+
+  <!-- 鼻子 -->
+  <ellipse cx="256" cy="268" rx="12" ry="9" fill="#e07090"/>
+
+  <!-- 嘴 -->
+  <path d="M244 278 Q256 292 268 278" fill="none" stroke="#c0506a" stroke-width="3.5" stroke-linecap="round"/>
+
+  <!-- 胡须（左） -->
+  <line x1="210" y1="272" x2="148" y2="264" stroke="#b08050" stroke-width="2.2" stroke-linecap="round" opacity="0.7"/>
+  <line x1="208" y1="280" x2="146" y2="278" stroke="#b08050" stroke-width="2.2" stroke-linecap="round" opacity="0.7"/>
+  <line x1="210" y1="267" x2="150" y2="255" stroke="#b08050" stroke-width="2.2" stroke-linecap="round" opacity="0.7"/>
+
+  <!-- 胡须（右） -->
+  <line x1="302" y1="272" x2="364" y2="264" stroke="#b08050" stroke-width="2.2" stroke-linecap="round" opacity="0.7"/>
+  <line x1="304" y1="280" x2="366" y2="278" stroke="#b08050" stroke-width="2.2" stroke-linecap="round" opacity="0.7"/>
+  <line x1="302" y1="267" x2="362" y2="255" stroke="#b08050" stroke-width="2.2" stroke-linecap="round" opacity="0.7"/>
+
+  <!-- 小爪子（左） -->
+  <ellipse cx="168" cy="400" rx="32" ry="22" fill="#e8b070"/>
+  <ellipse cx="152" cy="392" rx="11" ry="8" fill="#d49a60"/>
+  <ellipse cx="168" cy="388" rx="11" ry="8" fill="#d49a60"/>
+  <ellipse cx="184" cy="392" rx="11" ry="8" fill="#d49a60"/>
+
+  <!-- 小爪子（右） -->
+  <ellipse cx="344" cy="400" rx="32" ry="22" fill="#e8b070"/>
+  <ellipse cx="328" cy="392" rx="11" ry="8" fill="#d49a60"/>
+  <ellipse cx="344" cy="388" rx="11" ry="8" fill="#d49a60"/>
+  <ellipse cx="360" cy="392" rx="11" ry="8" fill="#d49a60"/>
+
+  <!-- 腹部纹理线 -->
+  <ellipse cx="256" cy="358" rx="42" ry="36" fill="none" stroke="#f0d8b0" stroke-width="1.5" opacity="0.5"/>
+
+  <!-- 小尾巴 -->
+  <ellipse cx="310" cy="432" rx="16" ry="12" fill="#fde8c8" transform="rotate(-20, 310, 432)"/>
+</svg>
