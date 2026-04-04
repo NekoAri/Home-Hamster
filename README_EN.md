@@ -30,7 +30,7 @@ Supports barcode scanning, expiry date tracking, approaching/expired item alerts
 | Styling | CSS Variables theme system | Dynamic theme color switching |
 | Scanning | Browser Camera API + QuaggaJS | Barcode recognition |
 | i18n | Custom lightweight i18n (Vue reactive) | No third-party dependencies |
-| HomeKit | Custom Homebridge plugin | Near-expiry / low stock sensors |
+| HomeKit （testing）| Custom Homebridge plugin | Near-expiry / low stock sensors |
 
 ## 📁 Project Structure
 
