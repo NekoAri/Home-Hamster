@@ -30,7 +30,7 @@
 | 样式 | CSS Variables 主题系统 | 可动态切换主题色 |
 | 扫码 | 浏览器摄像头 API + QuaggaJS | 条形码识别 |
 | 国际化 | 自研轻量 i18n (Vue reactive) | 无第三方依赖 |
-| HomeKit | 自定义 Homebridge 插件 | 临期/低库存传感器 |
+| HomeKit（测试中） | 自定义 Homebridge 插件 | 临期/低库存传感器 |
 
 ## 📁 项目结构
 
