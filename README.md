@@ -137,6 +137,10 @@ npm run dev
 
 ## 🔄 两种模式，怎么舒服怎么来
 
+<div align="center">
+<img src="assets/hamster_chat.png" alt="聊天中的小仓鼠" width="160" />
+</div>
+
 | 模式 | 小仓鼠的说明 |
 |------|-------------|
 | **🤖 Agent 对话** | 跟我聊天就行！"记一笔奶茶 15 块" "家里还有几包纸巾？" 我都能搞定～ |
@@ -168,6 +172,10 @@ npm run dev
 
 ## 🗄️ 小仓鼠的记账本
 
+<div align="center">
+<img src="assets/hamster_inventory.png" alt="整理物品的小仓鼠" width="160" />
+</div>
+
 | 表名 | 小仓鼠的说明 |
 |------|-------------|
 | `accounts` | 账目表 — 每一笔收支都记得清清楚楚，小仓鼠从不糊涂！ |
@@ -198,9 +206,19 @@ npm run dev
 - `POST /api/configs/agent/{id}/activate` — 激活 Agent 人设
 
 ### 📋 账目 / 类别 / 物品仓储 CRUD
+
+<div align="center">
+<img src="assets/hamster_money.png" alt="记账的小仓鼠" width="160" />
+</div>
+
 详见 http://localhost:8000/docs — 小仓鼠把所有接口都整理好啦～
 
 ### 📈 统计概览
+
+<div align="center">
+<img src="assets/hamster_think.png" alt="思考中的小仓鼠" width="160" />
+</div>
+
 - `GET /api/summary/overview` — 总览数据（收支汇总、分类排行、近7天趋势）
 - `GET /api/summary/inventory-stats` — 库存统计（总览、低库存预警、临期预警、过期提醒）
 - `GET /api/summary/accounts/count` — 账目总数（分页计算用）
@@ -209,6 +227,8 @@ npm run dev
 ---
 
 <div align="center">
+
+<img src="assets/hamster_sleep.png" alt="睡觉的小仓鼠" width="180" />
 
 ### 🐹 吱吱～谢谢你让小仓鼠来帮忙！
 
