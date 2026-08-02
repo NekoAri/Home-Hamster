@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="logo.png" alt="HomeHamster Logo" width="200"/>
+
 # 🐹 HomeHamster
 
 ### 你的小仓鼠家庭管理助手
