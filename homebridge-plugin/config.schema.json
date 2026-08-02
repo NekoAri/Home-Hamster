@@ -1,0 +1,33 @@
+{
+  "pluginAlias": "HomeInventory",
+  "pluginType": "platform",
+  "singular": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "serverUrl": {
+        "title": "后端服务地址",
+        "type": "string",
+        "default": "http://localhost:3000",
+        "description": "家庭仓库管理系统后端服务的 URL"
+      },
+      "checkInterval": {
+        "title": "检查间隔（秒）",
+        "type": "number",
+        "default": 60,
+        "minimum": 10,
+        "maximum": 3600,
+        "description": "多久检查一次库存状态"
+      },
+      "expiringDays": {
+        "title": "临期预警天数",
+        "type": "number",
+        "default": 7,
+        "minimum": 1,
+        "maximum": 30,
+        "description": "距离过期多少天时触发预警"
+      }
+    },
+    "required": ["serverUrl"]
+  }
+}

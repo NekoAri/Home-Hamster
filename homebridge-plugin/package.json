@@ -1,0 +1,17 @@
+{
+  "name": "homebridge-home-inventory",
+  "version": "1.0.0",
+  "description": "家庭仓库管理系统 Homebridge 插件 - 临期/低库存传感器",
+  "main": "index.js",
+  "keywords": [
+    "homebridge-plugin",
+    "homekit",
+    "inventory",
+    "stock"
+  ],
+  "engines": {
+    "homebridge": ">=1.0.0",
+    "node": ">=14.0.0"
+  },
+  "dependencies": {}
+}
