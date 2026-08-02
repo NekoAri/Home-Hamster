@@ -1,0 +1,32 @@
+# ============================================================
+# HomeHamster Docker Compose 配置
+# 启动 PostgreSQL + pgvector: docker-compose up -d
+# ============================================================
+
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库（内置 pgvector 插件）
+  postgres:
+    image: pgvector/pgvector:pg16    # 使用带 pgvector 的 PostgreSQL 16 镜像
+    container_name: homehamster-db
+    environment:
+      POSTGRES_USER: homehamster
+      POSTGRES_PASSWORD: homehamster
+      POSTGRES_DB: homehamster
+    ports:
+      - "5432:5432"
+    volumes:
+      # 数据持久化
+      - postgres_data:/var/lib/postgresql/data
+      # 初始化 SQL 脚本（容器首次启动时自动执行）
+      - ./backend/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U homehamster"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
