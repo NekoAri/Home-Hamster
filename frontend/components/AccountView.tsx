@@ -151,7 +151,7 @@ export default function AccountView() {
           </div>
         ) : accounts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-gray-400">
-            <p className="text-4xl mb-2">📭</p>
+            <img src="/hamsters/money.png" alt="" className="w-20 h-20 rounded-2xl object-cover mb-3 opacity-80" />
             <p className="text-sm">暂无账目记录</p>
           </div>
         ) : (

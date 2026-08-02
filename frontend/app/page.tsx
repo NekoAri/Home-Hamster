@@ -54,7 +54,11 @@ export default function Home() {
       <header className="flex items-center justify-between px-4 sm:px-6 py-3 bg-white/80 backdrop-blur-md border-b border-orange-100 shadow-sm">
         {/* 左侧：Logo + 名称 */}
         <div className="flex items-center gap-2">
-          <span className="text-2xl">{agentInfo.avatar}</span>
+          <img
+            src="/hamsters/logo.png"
+            alt="HomeHamster"
+            className="w-8 h-8 rounded-full object-cover ring-2 ring-orange-200"
+          />
           <span className="text-lg font-bold text-gray-800 hidden sm:inline">
             {agentInfo.name}
           </span>

@@ -63,7 +63,8 @@ export default function Settings({ onClose, onAgentChange }: SettingsProps) {
         {/* 标题栏 */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-            ⚙️ 设置
+            <img src="/hamsters/logo.png" alt="logo" className="w-7 h-7 rounded-full object-cover ring-2 ring-orange-200" />
+            设置
           </h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -376,7 +377,7 @@ function LLMConfigTab({ providers, configs, onRefresh }: LLMConfigTabProps) {
       <div className="space-y-2">
         {configs.length === 0 && !showForm ? (
           <div className="text-center py-12 text-gray-400">
-            <div className="text-4xl mb-2">🤖</div>
+            <img src="/hamsters/chat.png" alt="" className="w-20 h-20 rounded-2xl object-cover mx-auto mb-3 opacity-80" />
             <p className="text-sm">还没有配置任何模型，点击「添加配置」开始</p>
           </div>
         ) : (
@@ -687,7 +688,7 @@ function AgentConfigTab({ configs, llmConfigs, onRefresh, onAgentChange }: Agent
       <div className="space-y-2">
         {configs.length === 0 && !showForm ? (
           <div className="text-center py-12 text-gray-400">
-            <div className="text-4xl mb-2">🐹</div>
+            <img src="/hamsters/logo.png" alt="" className="w-20 h-20 rounded-2xl object-cover mx-auto mb-3 opacity-80" />
             <p className="text-sm">还没有配置 Agent 人设，点击「添加人设」开始</p>
           </div>
         ) : (

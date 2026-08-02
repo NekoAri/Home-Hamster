@@ -187,8 +187,12 @@ export default function Chat({ embedded = false }: ChatProps) {
       {/* ===== 顶部标题栏（仅在非嵌入模式下渲染） ===== */}
       {!embedded && (
         <header className="flex items-center justify-between px-6 py-4 bg-white/80 backdrop-blur-md border-b border-orange-100 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="text-3xl">{agentInfo.avatar}</div>
+            <div className="flex items-center gap-3">
+            <img
+              src="/hamsters/logo.png"
+              alt="Hamster"
+              className="w-10 h-10 rounded-full object-cover ring-2 ring-orange-200"
+            />
             <div>
               <h1 className="text-xl font-bold text-gray-800">{agentInfo.name}</h1>
               <p className="text-xs text-gray-500">家庭管理 Agent</p>
@@ -232,13 +236,17 @@ export default function Chat({ embedded = false }: ChatProps) {
               >
                 {/* 头像 */}
                 <div
-                  className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-lg ${
+                  className={`flex-shrink-0 w-9 h-9 rounded-full overflow-hidden ${
                     message.role === 'user'
                       ? 'bg-blue-100'
-                      : 'bg-orange-100'
+                      : 'bg-orange-100 ring-2 ring-orange-200'
                   }`}
                 >
-                  {message.role === 'user' ? '👤' : agentInfo.avatar}
+                  {message.role === 'user' ? (
+                    <span className="flex items-center justify-center w-full h-full text-lg">👤</span>
+                  ) : (
+                    <img src="/hamsters/logo.png" alt="AI" className="w-full h-full object-cover" />
+                  )}
                 </div>
 
                 {/* 消息气泡 */}
@@ -306,8 +314,8 @@ export default function Chat({ embedded = false }: ChatProps) {
           {isLoading && messages[messages.length - 1]?.role === 'user' && (
             <div className="flex justify-start message-fade-in">
               <div className="flex gap-3 max-w-[85%]">
-                <div className="flex-shrink-0 w-9 h-9 rounded-full bg-orange-100 flex items-center justify-center text-lg">
-                  {agentInfo.avatar}
+                <div className="flex-shrink-0 w-9 h-9 rounded-full bg-orange-100 overflow-hidden ring-2 ring-orange-200">
+                  <img src="/hamsters/think.png" alt="思考中" className="w-full h-full object-cover" />
                 </div>
                 <div className="bg-white rounded-2xl rounded-tl-sm shadow-sm border border-gray-100 px-4 py-3">
                   <div className="flex gap-1">

@@ -46,11 +46,11 @@ export default function Dashboard() {
   }, [activeTab, loadOverview])
 
   // Tab 配置
-  const tabs: { key: Tab; label: string; icon: string }[] = [
-    { key: 'overview', label: '概览', icon: '📊' },
-    { key: 'accounts', label: '账目管理', icon: '💰' },
-    { key: 'inventory', label: '物品管理', icon: '📦' },
-    { key: 'categories', label: '类别管理', icon: '🏷️' },
+  const tabs: { key: Tab; label: string; img: string }[] = [
+    { key: 'overview', label: '概览', img: '/hamsters/think.png' },
+    { key: 'accounts', label: '账目管理', img: '/hamsters/money.png' },
+    { key: 'inventory', label: '物品管理', img: '/hamsters/inventory.png' },
+    { key: 'categories', label: '类别管理', img: '/hamsters/logo.png' },
   ]
 
   return (
@@ -67,7 +67,7 @@ export default function Dashboard() {
                 : 'text-gray-600 hover:bg-orange-50 hover:text-orange-600'
             }`}
           >
-            <span>{tab.icon}</span>
+            <img src={tab.img} alt={tab.label} className={`w-5 h-5 rounded-full object-cover ${activeTab === tab.key ? 'ring-1 ring-white' : 'ring-1 ring-orange-200'}`} />
             <span>{tab.label}</span>
           </button>
         ))}
@@ -110,7 +110,8 @@ function OverviewPanel({
 }) {
   if (loading && !overview) {
     return (
-      <div className="flex items-center justify-center py-20">
+      <div className="flex flex-col items-center justify-center py-20">
+        <img src="/hamsters/think.png" alt="思考中" className="w-24 h-24 rounded-2xl object-cover mb-4 animate-pulse" />
         <div className="flex gap-1">
           <span className="inline-block w-3 h-3 bg-orange-300 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
           <span className="inline-block w-3 h-3 bg-orange-300 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -123,7 +124,8 @@ function OverviewPanel({
   if (!overview || !invStats) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-        <p>暂无数据</p>
+        <img src="/hamsters/sleep.png" alt="暂无数据" className="w-28 h-28 rounded-2xl object-cover mb-4 opacity-80" />
+        <p>暂无数据，小仓鼠还在打盹～</p>
         <button
           onClick={onRefresh}
           className="mt-4 px-4 py-2 rounded-lg bg-orange-500 text-white text-sm hover:bg-orange-600"
@@ -141,25 +143,25 @@ function OverviewPanel({
         <StatCard
           title="本月总支出"
           value={`¥${overview.total_expense.toFixed(2)}`}
-          icon="💸"
+          img="/hamsters/money.png"
           color="red"
         />
         <StatCard
           title="本月总收入"
           value={`¥${overview.total_income.toFixed(2)}`}
-          icon="💰"
+          img="/hamsters/money.png"
           color="green"
         />
         <StatCard
           title="净额"
           value={`¥${overview.net_amount.toFixed(2)}`}
-          icon="📈"
+          img="/hamsters/think.png"
           color={overview.net_amount >= 0 ? 'green' : 'red'}
         />
         <StatCard
           title="交易笔数"
           value={`${overview.transaction_count}`}
-          icon="📝"
+          img="/hamsters/logo.png"
           color="blue"
         />
       </div>
@@ -169,7 +171,7 @@ function OverviewPanel({
         {/* 分类支出排行 */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-            <span>🏷️</span> 支出分类排行
+            <img src="/hamsters/money.png" alt="" className="w-6 h-6 rounded-full object-cover" /> 支出分类排行
           </h3>
           {overview.category_breakdown.length > 0 ? (
             <div className="space-y-3">
@@ -200,7 +202,7 @@ function OverviewPanel({
         {/* 库存统计 */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-            <span>📦</span> 库存概览
+            <img src="/hamsters/inventory.png" alt="" className="w-6 h-6 rounded-full object-cover" /> 库存概览
           </h3>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div className="text-center py-3 bg-blue-50 rounded-lg">
@@ -249,7 +251,7 @@ function OverviewPanel({
       {/* 近7天支出趋势 */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
         <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-          <span>📅</span> 近 7 天支出趋势
+          <img src="/hamsters/think.png" alt="" className="w-6 h-6 rounded-full object-cover" /> 近 7 天支出趋势
         </h3>
         {overview.daily_trend.length > 0 ? (
           <div className="flex items-end justify-between gap-2 h-32">
@@ -299,12 +301,12 @@ function OverviewPanel({
 function StatCard({
   title,
   value,
-  icon,
+  img,
   color,
 }: {
   title: string
   value: string
-  icon: string
+  img: string
   color: 'red' | 'green' | 'blue' | 'orange'
 }) {
   const colorMap = {
@@ -317,7 +319,7 @@ function StatCard({
   return (
     <div className={`bg-gradient-to-br ${colorMap[color]} rounded-xl border p-4`}>
       <div className="flex items-center justify-between mb-2">
-        <span className="text-2xl">{icon}</span>
+        <img src={img} alt={title} className="w-8 h-8 rounded-full object-cover" />
       </div>
       <p className="text-2xl font-bold">{value}</p>
       <p className="text-xs text-gray-500 mt-1">{title}</p>
