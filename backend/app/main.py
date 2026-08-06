@@ -9,7 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import init_db_pool, close_db_pool
-from app.routers import agent, account, inventory, category, config, summary
+from app.services.agent_manager import AgentManager
+from app.routers import agent, account, inventory, category, config, summary, session
 
 # 日志配置
 logging.basicConfig(
@@ -26,6 +27,11 @@ async def lifespan(app: FastAPI):
     logger.info(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} 正在启动...")
     await init_db_pool()
     logger.info("✅ 数据库连接池已就绪")
+
+    # 初始化全局 Agent 实例（加载配置 + 创建 provider）
+    await AgentManager.get_instance().initialize()
+    logger.info("🐹 全局 Agent 实例已就绪")
+
     logger.info(f"🌐 服务地址: http://localhost:8000")
     logger.info(f"📖 API 文档: http://localhost:8000/docs")
 
@@ -55,7 +61,8 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(agent.router)       # Agent 对话（SSE 流式）
-app.include_router(config.router)     # 配置管理（LLM + Agent 人设）
+app.include_router(session.router)     # 对话会话管理 [v3 新增]
+app.include_router(config.router)     # 配置管理（LLM + Agent 人设，变更时热重载）
 app.include_router(account.router)     # 账目 CRUD
 app.include_router(inventory.router)   # 物品仓储 CRUD
 app.include_router(category.router)    # 物品类别 CRUD

@@ -2,6 +2,8 @@
 配置管理路由
 提供 LLM 配置和 Agent 人设配置的 CRUD API
 以及供应商预设信息查询（供前端下拉选择）
+
+v3 改进：配置变更后自动触发 AgentManager 热重载
 """
 
 from fastapi import APIRouter, HTTPException
@@ -12,9 +14,19 @@ from app.models import (
 )
 from app.services import crud
 from app.services.llm_provider import PROVIDER_PRESETS
+from app.services.agent_manager import AgentManager
 from app.database import get_pool
 
 router = APIRouter(prefix="/api/configs", tags=["配置管理"])
+
+
+async def _reload_agent():
+    """配置变更后触发 AgentManager 热重载（非阻塞，失败不影响操作结果）"""
+    try:
+        await AgentManager.get_instance().reload()
+    except Exception as e:
+        # 热重载失败不影响配置操作本身，下次对话时会自动重新加载
+        pass
 
 
 # ============================================================
@@ -23,10 +35,7 @@ router = APIRouter(prefix="/api/configs", tags=["配置管理"])
 
 @router.get("/providers", summary="获取支持的供应商列表")
 async def get_providers():
-    """
-    返回所有支持的 LLM 供应商信息
-    前端用此接口渲染供应商下拉框和默认值
-    """
+    """返回所有支持的 LLM 供应商信息，前端用此接口渲染供应商下拉框"""
     return PROVIDER_PRESETS
 
 
@@ -39,7 +48,7 @@ async def create_llm_config(config: LLMConfigCreate):
     """创建一条 LLM 供应商配置"""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        return await crud.create_llm_config(
+        result = await crud.create_llm_config(
             conn,
             name=config.name,
             provider=config.provider,
@@ -51,6 +60,9 @@ async def create_llm_config(config: LLMConfigCreate):
             max_tokens=config.max_tokens,
             is_active=config.is_active,
         )
+    if config.is_active:
+        await _reload_agent()
+    return result
 
 
 @router.get("/llm", response_model=list[LLMConfigResponse], summary="查询所有 LLM 配置")
@@ -59,7 +71,6 @@ async def list_llm_configs():
     pool = await get_pool()
     async with pool.acquire() as conn:
         configs = await crud.list_llm_configs(conn)
-        # 隐藏 API Key 的中间部分，只显示前4后4位
         for c in configs:
             key = c.get("api_key", "")
             if key and len(key) > 12:
@@ -75,7 +86,6 @@ async def get_active_llm():
         config = await crud.get_active_llm_config(conn)
         if not config:
             return None
-        # 隐藏 API Key
         key = config.get("api_key", "")
         if key and len(key) > 12:
             config["api_key"] = key[:4] + "*" * (len(key) - 8) + key[-4:]
@@ -87,7 +97,6 @@ async def update_llm_config(config_id: int, config: LLMConfigUpdate):
     """更新 LLM 配置"""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # 如果 api_key 是脱敏的（包含 *），则不更新 api_key
         update_data = config.model_dump(exclude_unset=True)
         if update_data.get("api_key") and "*" in update_data["api_key"]:
             del update_data["api_key"]
@@ -95,11 +104,11 @@ async def update_llm_config(config_id: int, config: LLMConfigUpdate):
         record = await crud.update_llm_config(conn, config_id, **update_data)
         if not record:
             raise HTTPException(status_code=404, detail="LLM 配置不存在")
-        # 隐藏 API Key
         key = record.get("api_key", "")
         if key and len(key) > 12:
             record["api_key"] = key[:4] + "*" * (len(key) - 8) + key[-4:]
-        return record
+    await _reload_agent()
+    return record
 
 
 @router.delete("/llm/{config_id}", summary="删除 LLM 配置")
@@ -110,7 +119,8 @@ async def delete_llm_config(config_id: int):
         success = await crud.delete_llm_config(conn, config_id)
         if not success:
             raise HTTPException(status_code=404, detail="LLM 配置不存在")
-        return {"message": "删除成功", "id": config_id}
+    await _reload_agent()
+    return {"message": "删除成功", "id": config_id}
 
 
 @router.post("/llm/{config_id}/activate", summary="激活 LLM 配置")
@@ -121,7 +131,8 @@ async def activate_llm(config_id: int):
         result = await crud.activate_llm_config(conn, config_id)
         if not result:
             raise HTTPException(status_code=404, detail="LLM 配置不存在")
-        return {"message": "已激活", "config": result}
+    await _reload_agent()
+    return {"message": "已激活", "config": result}
 
 
 # ============================================================
@@ -133,7 +144,7 @@ async def create_agent_config(config: AgentConfigCreate):
     """创建 Agent 人设配置"""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        return await crud.create_agent_config(
+        result = await crud.create_agent_config(
             conn,
             name=config.name,
             avatar=config.avatar,
@@ -143,6 +154,9 @@ async def create_agent_config(config: AgentConfigCreate):
             temperature=config.temperature,
             is_active=config.is_active,
         )
+    if config.is_active:
+        await _reload_agent()
+    return result
 
 
 @router.get("/agent", response_model=list[AgentConfigResponse], summary="查询所有 Agent 人设配置")
@@ -169,7 +183,8 @@ async def update_agent_config(config_id: int, config: AgentConfigUpdate):
         record = await crud.update_agent_config(conn, config_id, **config.model_dump(exclude_unset=True))
         if not record:
             raise HTTPException(status_code=404, detail="Agent 配置不存在")
-        return record
+    await _reload_agent()
+    return record
 
 
 @router.delete("/agent/{config_id}", summary="删除 Agent 人设配置")
@@ -180,7 +195,8 @@ async def delete_agent_config(config_id: int):
         success = await crud.delete_agent_config(conn, config_id)
         if not success:
             raise HTTPException(status_code=404, detail="Agent 配置不存在")
-        return {"message": "删除成功", "id": config_id}
+    await _reload_agent()
+    return {"message": "删除成功", "id": config_id}
 
 
 @router.post("/agent/{config_id}/activate", summary="激活 Agent 人设配置")
@@ -191,4 +207,5 @@ async def activate_agent(config_id: int):
         result = await crud.activate_agent_config(conn, config_id)
         if not result:
             raise HTTPException(status_code=404, detail="Agent 配置不存在")
-        return {"message": "已激活", "config": result}
+    await _reload_agent()
+    return {"message": "已激活", "config": result}

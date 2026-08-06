@@ -1,7 +1,10 @@
 """
-Agent 对话路由
-提供 SSE 流式对话接口，支持 Function Calling
-自动从数据库加载当前激活的 LLM 配置和 Agent 人设配置
+Agent 对话路由（v3 - 全局实例 + 历史管理）
+
+改进：
+- 使用 session_id + content 替代全量 messages，避免长对话阻塞
+- Agent 实例全局复用，无需每次请求重新加载配置
+- 历史消息由后端管理，前端只需发送最新消息
 """
 
 from fastapi import APIRouter
@@ -17,40 +20,28 @@ async def agent_chat(request: ChatRequest):
     """
     Agent 对话接口（SSE 流式输出）
 
-    接收用户的对话消息，自动加载当前激活的 LLM 配置和 Agent 人设配置，
-    通过对应供应商的 API 进行处理，支持 Function Calling 调用家庭管理工具，
-    最终以 SSE 格式流式返回响应。
+    v3 改进：
+    - 请求体只需 session_id + content，不再传全量 messages
+    - 后端从数据库加载对话历史，应用滑动窗口 + 摘要压缩
+    - 使用全局缓存的 Agent provider 实例
 
     请求体格式：
     ```json
     {
-        "messages": [
-            {"role": "user", "content": "帮我记一笔，午餐花了25元"}
-        ],
+        "session_id": "uuid-string",
+        "content": "帮我记一笔，午餐花了25元",
         "user_id": "default"
     }
     ```
 
     响应格式：SSE 流，每条消息格式为 `data: {"content": "token"}\\n\\n`
-
-    配置说明：
-    - LLM 配置通过 `POST /api/configs/llm` 创建并激活
-    - Agent 人设通过 `POST /api/configs/agent` 创建并激活
-    - 未配置 LLM 时会返回提示信息
     """
-
-    # 将 Pydantic 模型转为 LLM 所需的消息格式
-    messages = [
-        {"role": msg.role, "content": msg.content}
-        for msg in request.messages
-    ]
-
     return StreamingResponse(
-        chat_stream(messages, request.user_id),
+        chat_stream(request.session_id, request.content, request.user_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲，确保实时流式输出
+            "X-Accel-Buffering": "no",
         },
     )

@@ -125,9 +125,21 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """Agent 对话请求"""
-    messages: list[ChatMessage] = Field(..., description="对话历史")
+    """Agent 对话请求（v3: 使用 session_id + content 替代全量 messages）"""
+    session_id: str = Field(..., description="对话会话 ID")
+    content: str = Field(..., description="用户最新消息内容")
     user_id: str = Field("default", description="用户标识")
+
+
+class SessionCreateRequest(BaseModel):
+    """创建对话会话请求"""
+    user_id: str = Field("default", description="用户标识")
+    title: Optional[str] = Field(None, description="会话标题（可选）")
+
+
+class SessionUpdateRequest(BaseModel):
+    """更新会话请求"""
+    title: Optional[str] = Field(None, max_length=200, description="会话标题")
 
 
 # ============================================================

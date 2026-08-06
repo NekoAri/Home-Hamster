@@ -41,6 +41,37 @@ export interface AgentConfig {
   updated_at: string
 }
 
+// ---- 对话会话相关类型 ----
+
+export interface ChatSession {
+  id: number
+  session_id: string
+  user_id: string
+  title: string
+  message_count: number
+  summary: string
+  last_message: string | null
+  last_message_time: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ChatMessageRecord {
+  id: number
+  session_id: string
+  role: string  // 'user' | 'assistant' | 'tool'
+  content: string
+  tool_calls: any[] | null
+  tool_call_id: string | null
+  token_count: number
+  created_at: string
+}
+
+export interface SessionMessagesResponse {
+  session: ChatSession
+  messages: ChatMessageRecord[]
+}
+
 // ---- 账目相关类型 ----
 
 export interface Account {
@@ -337,4 +368,37 @@ export async function getOverview(params: {
 
 export async function getInventoryStats(): Promise<InventoryStats> {
   return apiFetch('/api/summary/inventory-stats')
+}
+
+// ============================================================
+// 对话会话管理 API [v3 新增]
+// ============================================================
+
+export async function createSession(data: {
+  user_id?: string
+  title?: string
+}): Promise<ChatSession> {
+  return apiFetch('/api/sessions', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function listSessions(user_id: string = 'default'): Promise<ChatSession[]> {
+  return apiFetch(`/api/sessions?user_id=${encodeURIComponent(user_id)}`)
+}
+
+export async function getSessionMessages(sessionId: string): Promise<SessionMessagesResponse> {
+  return apiFetch(`/api/sessions/${sessionId}/messages`)
+}
+
+export async function deleteSession(sessionId: string): Promise<{ message: string }> {
+  return apiFetch(`/api/sessions/${sessionId}`, { method: 'DELETE' })
+}
+
+export async function updateSessionTitle(sessionId: string, title: string): Promise<ChatSession> {
+  return apiFetch(`/api/sessions/${sessionId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ title }),
+  })
 }

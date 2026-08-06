@@ -222,6 +222,66 @@ CREATE TRIGGER trigger_agent_configs_updated_at
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================
+-- 5.4 对话会话表（chat_sessions）
+--    管理用户与 Agent 的对话会话，支持多会话切换
+--    包含历史消息摘要，用于滑动窗口上下文压缩
+-- ============================================================
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id              BIGSERIAL PRIMARY KEY,
+    session_id      VARCHAR(100)  NOT NULL UNIQUE,             -- 会话唯一标识（UUID，前端生成）
+    user_id         VARCHAR(100)  NOT NULL DEFAULT 'default',  -- 用户标识
+    title           VARCHAR(200),                              -- 会话标题（自动从首条消息生成）
+    summary         TEXT          NOT NULL DEFAULT '',          -- 历史消息摘要（超过滑动窗口时自动生成）
+    message_count   INTEGER       NOT NULL DEFAULT 0,           -- 消息总数
+    is_archived     BOOLEAN       NOT NULL DEFAULT FALSE,       -- 是否归档
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+-- 为用户 ID 建立索引
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id
+    ON chat_sessions (user_id);
+
+-- 为更新时间建立索引（按最近会话排序）
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated_at
+    ON chat_sessions (updated_at DESC);
+
+-- ============================================================
+-- 5.5 对话消息表（chat_messages）
+--    持久化存储每条对话消息，支持从数据库重建上下文
+-- ============================================================
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id              BIGSERIAL PRIMARY KEY,
+    session_id      VARCHAR(100)  NOT NULL,                     -- 关联会话
+    role            VARCHAR(20)   NOT NULL,                     -- 角色: user / assistant / tool
+    content         TEXT          NOT NULL DEFAULT '',           -- 消息内容
+    tool_calls      JSONB,                                      -- 工具调用信息（assistant 消息可能携带）
+    tool_call_id    VARCHAR(100),                               -- 工具调用 ID（tool 角色消息）
+    token_count     INTEGER       NOT NULL DEFAULT 0,            -- 估算的 token 数
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+
+    -- 外键约束：消息必须属于已存在的会话
+    CONSTRAINT fk_chat_messages_session
+        FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id)
+        ON DELETE CASCADE
+);
+
+-- 为会话 ID 建立索引
+CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id
+    ON chat_messages (session_id);
+
+-- 为会话 ID + 创建时间建立联合索引（按时间顺序加载历史消息）
+CREATE INDEX IF NOT EXISTS idx_chat_messages_session_time
+    ON chat_messages (session_id, created_at);
+
+-- ============================================================
+-- 5.6 为新表创建 updated_at 触发器
+-- ============================================================
+CREATE TRIGGER trigger_chat_sessions_updated_at
+    BEFORE UPDATE ON chat_sessions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================================
 -- 6. 初始数据（可选）
 -- ============================================================
 INSERT INTO item_categories (name, code, description) VALUES
