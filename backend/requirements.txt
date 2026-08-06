@@ -10,6 +10,7 @@ uvicorn[standard]==0.30.1
 # 数据库
 asyncpg==0.29.0              # PostgreSQL 异步驱动
 pgvector==0.3.0              # pgvector Python 支持
+pg8000==1.31.2               # 纯 Python PostgreSQL 驱动（用于 init_db.py 初始化脚本，兼容 GBK 服务器）
 
 # 配置管理
 pydantic==2.8.2
