@@ -97,8 +97,12 @@ async def chat_stream(
             tools=TOOLS_DEFINITION_OPENAI,
             result=result,
         ):
-            collected_content.append(token)
-            yield f"data: {json.dumps({'content': token}, ensure_ascii=False)}\n\n"
+            if token is None:
+                # 推理阶段（reasoning_content），不发内容，发心跳保活
+                yield HEARTBEAT
+            else:
+                collected_content.append(token)
+                yield f"data: {json.dumps({'content': token}, ensure_ascii=False)}\n\n"
     except Exception as e:
         logger.error(f"LLM 流式请求失败: {type(e).__name__}: {e}")
         error_str = str(e)
@@ -147,8 +151,11 @@ async def chat_stream(
         yield HEARTBEAT
         try:
             async for token in provider.chat_stream(messages=full_messages):
-                collected_content.append(token)
-                yield f"data: {json.dumps({'content': token}, ensure_ascii=False)}\n\n"
+                if token is None:
+                    yield HEARTBEAT
+                else:
+                    collected_content.append(token)
+                    yield f"data: {json.dumps({'content': token}, ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.error(f"LLM 第二轮流式输出失败: {e}")
             yield f"data: {json.dumps({'content': f'❌ 流式输出中断: {str(e)}'}, ensure_ascii=False)}\n\n"

@@ -154,7 +154,7 @@ export default function AccountView() {
             <select
               value={filters.type || ''}
               onChange={(e) => handleFilterChange('type', e.target.value)}
-              className="px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+              className="w-32 h-9 px-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
             >
               <option value="">全部</option>
               <option value="expense">支出</option>
@@ -170,7 +170,7 @@ export default function AccountView() {
               value={filters.category || ''}
               onChange={(e) => handleFilterChange('category', e.target.value)}
               placeholder="如：餐饮"
-              className="px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 w-32"
+              className="w-32 h-9 px-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
             />
           </div>
 
@@ -181,7 +181,7 @@ export default function AccountView() {
               type="date"
               value={filters.start_date?.split('T')[0] || ''}
               onChange={(e) => handleFilterChange('start_date', e.target.value ? `${e.target.value}T00:00:00` : '')}
-              className="px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+              className="w-32 h-9 px-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
             />
           </div>
 
@@ -192,14 +192,14 @@ export default function AccountView() {
               type="date"
               value={filters.end_date?.split('T')[0] || ''}
               onChange={(e) => handleFilterChange('end_date', e.target.value ? `${e.target.value}T23:59:59` : '')}
-              className="px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+              className="w-32 h-9 px-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
             />
           </div>
 
           {/* 重置按钮 */}
           <button
             onClick={() => { setPage(0); setFilters({ limit: PAGE_SIZE, offset: 0 }) }}
-            className="px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm transition-colors"
+            className="h-9 px-3 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm transition-colors"
           >
             重置
           </button>
@@ -207,7 +207,7 @@ export default function AccountView() {
           {/* 新增按钮 */}
           <button
             onClick={() => { setEditing(null); setShowForm(true) }}
-            className="ml-auto px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-1"
+            className="ml-auto h-9 px-4 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-1"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />

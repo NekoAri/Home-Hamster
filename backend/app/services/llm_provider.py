@@ -217,11 +217,24 @@ class OpenAICompatibleProvider(LLMProvider):
             tool_calls=tool_calls,
         )
 
+    @staticmethod
+    def _get_reasoning(delta) -> str | None:
+        """提取推理内容（reasoning_content），兼容 OpenAI SDK 各版本"""
+        # 直接属性
+        rc = getattr(delta, "reasoning_content", None)
+        if rc:
+            return rc
+        # model_extra 字典（SDK 未定义该字段时存放在此）
+        extra = getattr(delta, "model_extra", None)
+        if extra and isinstance(extra, dict):
+            return extra.get("reasoning_content")
+        return None
+
     async def chat_stream(
         self,
         messages: list[dict],
     ) -> AsyncGenerator[str, None]:
-        """使用 OpenAI 接口流式输出"""
+        """使用 OpenAI 接口流式输出（推理模型 yield None 保持心跳）"""
         client = self._get_client()
         stream = await client.chat.completions.create(
             model=self.config.model_name,
@@ -232,8 +245,18 @@ class OpenAICompatibleProvider(LLMProvider):
         )
 
         async for chunk in stream:
-            if chunk.choices[0].delta.content is not None:
-                yield chunk.choices[0].delta.content
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+
+            # 正常文本内容
+            if delta.content:
+                yield delta.content
+
+            # 推理内容 → yield None 触发 agent_service 心跳保活
+            reasoning = self._get_reasoning(delta)
+            if reasoning:
+                yield None
 
     async def chat_stream_with_tools(
         self,
@@ -275,6 +298,11 @@ class OpenAICompatibleProvider(LLMProvider):
             if delta.content:
                 has_content = True
                 yield delta.content
+
+            # 推理内容 → yield None 触发 agent_service 心跳保活
+            reasoning = self._get_reasoning(delta)
+            if reasoning:
+                yield None
 
             # 收集工具调用 delta
             if delta.tool_calls:

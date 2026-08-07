@@ -61,13 +61,9 @@ async def add_expense(
                 note=note,
             )
             return (
-                f"✅ 账目已添加成功！\n"
-                f"  - 类型: {'支出' if expense_type == 'expense' else '收入'}\n"
-                f"  - 金额: ¥{abs(amount):.2f}\n"
-                f"  - 分类: {category}\n"
-                f"  - 账本: {ledger_label}\n"
-                f"  - 备注: {note or '无'}\n"
-                f"  - 记录ID: {record['id']}"
+                f"✅ 已记账：{'支出' if expense_type == 'expense' else '收入'} ¥{abs(amount):.2f}"
+                f" | 分类: {category} | 账本: {ledger_label}"
+                f" | 备注: {note or '无'} | ID: {record['id']}"
             )
     except Exception as e:
         logger.error(f"添加账目失败: {e}")
@@ -245,11 +241,9 @@ async def inventory_type(
                 description=description,
             )
             return (
-                f"✅ 物品类别已添加成功！\n"
-                f"  - 类别名称: {name}\n"
-                f"  - 类别编号: {code}\n"
-                f"  - 描述: {description or '无'}\n"
-                f"  - 类别ID: {record['id']}"
+                f"✅ 类别已添加：{name}({code})"
+                + (f" | 描述: {description}" if description else "")
+                + f" | ID: {record['id']}"
             )
     except Exception as e:
         logger.error(f"添加物品类别失败: {e}")
@@ -352,6 +346,137 @@ async def list_ledgers() -> str:
         return f"❌ 查询账本列表失败: {str(e)}"
 
 
+async def add_purchase(
+    item_name: str,
+    quantity: float,
+    unit: str,
+    amount: float,
+    category: str = "",
+    location: str = "",
+    ledger_name: str = "",
+    note: str = "",
+) -> str:
+    """
+    记录一笔购物消费，同时录入/更新物品库存。当用户购买物品时（如"买了一箱牛奶花了60元"），调用此工具一次性完成记账和入库。
+
+    Args:
+        item_name: 物品名称（如"牛奶"、"抽纸"）
+        quantity: 购买数量
+        unit: 单位（如"箱"、"瓶"、"包"、"个"）
+        amount: 花费金额（正数）
+        category: 账目分类（如"购物"、"食品"），为空则默认"购物"
+        location: 存放位置（如"厨房"、"冰箱"），为空则不设置
+        ledger_name: 账本名称，为空则记到默认账本
+        note: 备注
+
+    Returns:
+        操作结果描述（记账+入库）
+    """
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # 1. 记账
+            ledger_id = None
+            ledger_label = "默认账本"
+            if ledger_name:
+                ledger = await crud.get_ledger_by_name(conn, ledger_name)
+                if ledger:
+                    ledger_id = ledger["id"]
+                    ledger_label = f"{ledger['icon']} {ledger['name']}"
+                else:
+                    return f"❌ 未找到名为「{ledger_name}」的账本。"
+
+            cat = category or "购物"
+            actual_amount = -abs(amount)
+            await crud.create_account(
+                conn,
+                amount=actual_amount,
+                category=cat,
+                type="expense",
+                ledger_id=ledger_id,
+                note=note or f"购买{item_name}",
+            )
+
+            # 2. 入库（同名物品累加数量）
+            existing = await crud.get_inventory_by_name(conn, item_name)
+            if existing:
+                new_qty = float(existing["quantity"]) + quantity
+                await crud.update_inventory(
+                    conn,
+                    existing["id"],
+                    quantity=new_qty,
+                    location=location or existing.get("location") or None,
+                )
+                inv_action = f"库存已更新：{item_name} {existing['quantity']}{existing['unit']} → {new_qty}{unit}"
+            else:
+                await crud.create_inventory(
+                    conn,
+                    name=item_name,
+                    quantity=quantity,
+                    unit=unit,
+                    location=location or None,
+                )
+                inv_action = f"新物品已入库：{item_name} {quantity}{unit}"
+
+            logger.info(f"add_purchase: {item_name} x{quantity}{unit} ¥{amount} | 账本={ledger_label}")
+
+            return (
+                f"✅ 已记账+入库\n"
+                f"  支出 ¥{amount:.2f} → {ledger_label}（{cat}）\n"
+                f"  {inv_action}"
+            )
+    except Exception as e:
+        logger.error(f"add_purchase 失败: {e}")
+        return f"❌ 操作失败: {str(e)}"
+
+
+async def add_inventory(
+    name: str,
+    quantity: float,
+    unit: str = "个",
+    location: str = "",
+    note: str = "",
+) -> str:
+    """
+    添加或补充物品库存（不涉及记账）。当用户想录入已有物品、补充库存、登记家中现有物品时调用。
+
+    Args:
+        name: 物品名称
+        quantity: 数量
+        unit: 单位（如"个"、"瓶"、"箱"、"包"）
+        location: 存放位置（如"厨房"、"冰箱"）
+        note: 备注
+
+    Returns:
+        操作结果描述
+    """
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            existing = await crud.get_inventory_by_name(conn, name)
+            if existing:
+                new_qty = float(existing["quantity"]) + quantity
+                await crud.update_inventory(
+                    conn,
+                    existing["id"],
+                    quantity=new_qty,
+                    location=location or existing.get("location") or None,
+                )
+                return f"✅ 库存已更新：{name} {existing['quantity']}{existing['unit']} → {new_qty}{unit}"
+            else:
+                await crud.create_inventory(
+                    conn,
+                    name=name,
+                    quantity=quantity,
+                    unit=unit,
+                    location=location or None,
+                )
+                return f"✅ 新物品已入库：{name} {quantity}{unit}"
+    except Exception as e:
+        logger.error(f"add_inventory 失败: {e}")
+        return f"❌ 操作失败: {str(e)}"
+
+
 # ============================================================
 # OpenAI Function Calling 工具定义
 # 将上面的函数定义为 OpenAI tools 格式，供 Agent 使用
@@ -363,8 +488,53 @@ TOOLS_DEFINITION_OPENAI = [
     {
         "type": "function",
         "function": {
+            "name": "add_purchase",
+            "description": "记录一笔购物消费，同时自动录入或更新物品库存。当用户说买了某样东西、采购物品、购物消费时（如'买了一箱牛奶花了60元'、'买了2包纸巾30元'），调用此工具一次性完成记账和入库。如果用户只是花钱但没有具体物品（如打车、交水电费），用 add_expense 而非此工具。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item_name": {
+                        "type": "string",
+                        "description": "物品名称，如：牛奶、抽纸、大米",
+                    },
+                    "quantity": {
+                        "type": "number",
+                        "description": "购买数量",
+                    },
+                    "unit": {
+                        "type": "string",
+                        "description": "单位，如：箱、瓶、包、个、袋",
+                    },
+                    "amount": {
+                        "type": "number",
+                        "description": "花费金额（正数），如 60.5",
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "账目分类，如：购物、食品、日用品。不传则默认'购物'。",
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "存放位置，如：厨房、冰箱、卧室。不传则不设置。",
+                    },
+                    "ledger_name": {
+                        "type": "string",
+                        "description": "账本名称，如：日常开销、家庭公共。不传则记到默认账本。",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "备注信息",
+                    },
+                },
+                "required": ["item_name", "quantity", "unit", "amount"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "add_expense",
-            "description": "添加一条家庭账目记录（支出或收入），可指定账本。当用户提到消费、花钱、收入、记账等操作时调用此工具。",
+            "description": "添加一条家庭账目记录（支出或收入），可指定账本。当用户提到消费、花钱、收入、记账等操作，但不涉及具体物品采购时调用此工具。如打车、交水电费、发工资等。涉及购买具体物品时请用 add_purchase。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -445,31 +615,6 @@ TOOLS_DEFINITION_OPENAI = [
     {
         "type": "function",
         "function": {
-            "name": "inventory_type",
-            "description": "新增物品类别。当用户需要添加新的物品分类时调用此工具。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "类别名称，如：食品、日用品、药品",
-                    },
-                    "code": {
-                        "type": "string",
-                        "description": "类别编号（英文大写），如：FOOD、DAILY、MEDICINE",
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "类别描述信息",
-                    },
-                },
-                "required": ["name", "code"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "check_inventory",
             "description": "查询家庭物品库存信息。当用户想知道家里有什么物品、某物品库存多少、某位置的物品时调用此工具。",
             "parameters": {
@@ -495,16 +640,76 @@ TOOLS_DEFINITION_OPENAI = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_inventory",
+            "description": "添加或补充物品库存（不涉及记账）。当用户想录入已有物品、补充库存、登记家中现有物品时调用。如'家里还有5包纸巾'、'补充3瓶矿泉水'。涉及花钱购买时请用 add_purchase。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "物品名称，如：牛奶、抽纸",
+                    },
+                    "quantity": {
+                        "type": "number",
+                        "description": "数量",
+                    },
+                    "unit": {
+                        "type": "string",
+                        "description": "单位，如：个、瓶、箱、包、袋",
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "存放位置，如：厨房、冰箱、卧室",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "备注信息",
+                    },
+                },
+                "required": ["name", "quantity"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "inventory_type",
+            "description": "新增物品类别。当用户需要添加新的物品分类时调用此工具。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "类别名称，如：食品、日用品、药品",
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "类别编号（英文大写），如：FOOD、DAILY、MEDICINE",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "类别描述信息",
+                    },
+                },
+                "required": ["name", "code"],
+            },
+        },
+    },
 ]
 
 
 # 工具名称到函数的映射表
 TOOL_FUNCTIONS = {
+    "add_purchase": add_purchase,
     "add_expense": add_expense,
     "check_expense": check_expense,
     "list_ledgers": list_ledgers,
-    "inventory_type": inventory_type,
     "check_inventory": check_inventory,
+    "add_inventory": add_inventory,
+    "inventory_type": inventory_type,
 }
 
 # 向后兼容别名

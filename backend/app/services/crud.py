@@ -475,6 +475,23 @@ async def get_inventory(conn: asyncpg.Connection, inventory_id: int) -> Optional
     return dict(row) if row else None
 
 
+async def get_inventory_by_name(conn: asyncpg.Connection, name: str) -> Optional[dict]:
+    """根据物品名称精确查询（用于采购时去重/累加库存）"""
+    row = await conn.fetchrow(
+        """
+        SELECT i.id, i.name, i.barcode, i.category_id, c.name AS category_name,
+               i.quantity, i.unit, i.location, i.expiry_date, i.custom_attrs,
+               i.created_at, i.updated_at
+        FROM inventory i
+        LEFT JOIN item_categories c ON i.category_id = c.id
+        WHERE i.name = $1
+        LIMIT 1
+        """,
+        name,
+    )
+    return dict(row) if row else None
+
+
 async def count_inventory(
     conn: asyncpg.Connection,
     name: Optional[str] = None,
