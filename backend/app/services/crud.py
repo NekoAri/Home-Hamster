@@ -10,6 +10,130 @@ from typing import Optional, Any
 
 
 # ============================================================
+# 账本 CRUD
+# ============================================================
+
+async def create_ledger(
+    conn: asyncpg.Connection,
+    name: str,
+    icon: str = "📔",
+    color: str = "orange",
+    description: Optional[str] = None,
+    is_default: bool = False,
+    sort_order: int = 0,
+) -> dict:
+    """创建账本"""
+    # 如果设为默认，先取消其他默认账本
+    if is_default:
+        await conn.execute("UPDATE ledgers SET is_default = FALSE WHERE is_default = TRUE")
+    row = await conn.fetchrow(
+        """
+        INSERT INTO ledgers (name, icon, color, description, is_default, sort_order)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, name, icon, color, description, is_default, sort_order, created_at, updated_at
+        """,
+        name, icon, color, description, is_default, sort_order,
+    )
+    return dict(row)
+
+
+async def get_ledger(conn: asyncpg.Connection, ledger_id: int) -> Optional[dict]:
+    """根据 ID 查询账本"""
+    row = await conn.fetchrow(
+        "SELECT id, name, icon, color, description, is_default, sort_order, created_at, updated_at "
+        "FROM ledgers WHERE id = $1",
+        ledger_id,
+    )
+    return dict(row) if row else None
+
+
+async def get_ledger_by_name(conn: asyncpg.Connection, name: str) -> Optional[dict]:
+    """根据名称查询账本（模糊匹配）"""
+    row = await conn.fetchrow(
+        "SELECT id, name, icon, color, description, is_default, sort_order, created_at, updated_at "
+        "FROM ledgers WHERE name ILIKE $1 LIMIT 1",
+        f"%{name}%",
+    )
+    return dict(row) if row else None
+
+
+async def list_ledgers(
+    conn: asyncpg.Connection,
+    include_stats: bool = False,
+) -> list[dict]:
+    """查询所有账本，可选包含统计信息"""
+    if not include_stats:
+        rows = await conn.fetch(
+            "SELECT id, name, icon, color, description, is_default, sort_order, created_at, updated_at "
+            "FROM ledgers ORDER BY is_default DESC, sort_order ASC, id ASC"
+        )
+        return [dict(row) for row in rows]
+    else:
+        rows = await conn.fetch(
+            """
+            SELECT l.id, l.name, l.icon, l.color, l.description, l.is_default, l.sort_order,
+                   l.created_at, l.updated_at,
+                   COUNT(a.id) AS record_count,
+                   COALESCE(SUM(CASE WHEN a.type = 'expense' THEN ABS(a.amount) ELSE 0 END), 0) AS total_expense,
+                   COALESCE(SUM(CASE WHEN a.type = 'income' THEN a.amount ELSE 0 END), 0) AS total_income
+            FROM ledgers l
+            LEFT JOIN accounts a ON a.ledger_id = l.id
+            GROUP BY l.id, l.name, l.icon, l.color, l.description, l.is_default, l.sort_order, l.created_at, l.updated_at
+            ORDER BY l.is_default DESC, l.sort_order ASC, l.id ASC
+            """
+        )
+        return [dict(row) for row in rows]
+
+
+async def update_ledger(
+    conn: asyncpg.Connection,
+    ledger_id: int,
+    **kwargs: Any,
+) -> Optional[dict]:
+    """更新账本"""
+    allowed_fields = {"name", "icon", "color", "description", "is_default", "sort_order"}
+    updates = {k: v for k, v in kwargs.items() if k in allowed_fields and v is not None}
+    if not updates:
+        return await get_ledger(conn, ledger_id)
+
+    # 如果设为默认，先取消其他默认账本
+    if updates.get("is_default"):
+        await conn.execute("UPDATE ledgers SET is_default = FALSE WHERE is_default = TRUE AND id != $1", ledger_id)
+
+    set_clauses = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(updates.keys()))
+    values = [ledger_id] + list(updates.values())
+    query = (
+        f"UPDATE ledgers SET {set_clauses} "
+        f"WHERE id = $1 "
+        f"RETURNING id, name, icon, color, description, is_default, sort_order, created_at, updated_at"
+    )
+    row = await conn.fetchrow(query, *values)
+    return dict(row) if row else None
+
+
+async def delete_ledger(conn: asyncpg.Connection, ledger_id: int) -> bool:
+    """删除账本（不允许删除有记录的账本，或默认账本）"""
+    # 检查是否为默认账本
+    is_default = await conn.fetchval("SELECT is_default FROM ledgers WHERE id = $1", ledger_id)
+    if is_default:
+        return False
+    # 检查是否有记录
+    count = await conn.fetchval("SELECT COUNT(*) FROM accounts WHERE ledger_id = $1", ledger_id)
+    if count > 0:
+        return False
+    result = await conn.execute("DELETE FROM ledgers WHERE id = $1", ledger_id)
+    return result.endswith("1")
+
+
+async def get_default_ledger_id(conn: asyncpg.Connection) -> int:
+    """获取默认账本ID"""
+    ledger_id = await conn.fetchval("SELECT id FROM ledgers WHERE is_default = TRUE ORDER BY id LIMIT 1")
+    if not ledger_id:
+        ledger_id = await conn.fetchval("SELECT id FROM ledgers ORDER BY id LIMIT 1")
+    return ledger_id
+
+
+# ============================================================
 # 账目 CRUD
 # ============================================================
 
@@ -20,15 +144,19 @@ async def create_account(
     type: str = "expense",
     occurred_at: Optional[datetime] = None,
     note: Optional[str] = None,
+    ledger_id: Optional[int] = None,
 ) -> dict:
     """创建一条账目记录"""
+    # 如果未指定账本，使用默认账本
+    if not ledger_id:
+        ledger_id = await get_default_ledger_id(conn)
     row = await conn.fetchrow(
         """
-        INSERT INTO accounts (amount, category, type, occurred_at, note)
-        VALUES ($1, $2, $3, COALESCE($4, NOW()), $5)
-        RETURNING id, amount, category, type, occurred_at, note, created_at, updated_at
+        INSERT INTO accounts (amount, category, type, ledger_id, occurred_at, note)
+        VALUES ($1, $2, $3, $4, COALESCE($5, NOW()), $6)
+        RETURNING id, amount, category, type, ledger_id, occurred_at, note, created_at, updated_at
         """,
-        amount, category, type, occurred_at, note,
+        amount, category, type, ledger_id, occurred_at, note,
     )
     return dict(row)
 
@@ -36,8 +164,10 @@ async def create_account(
 async def get_account(conn: asyncpg.Connection, account_id: int) -> Optional[dict]:
     """根据 ID 查询单条账目"""
     row = await conn.fetchrow(
-        "SELECT id, amount, category, type, occurred_at, note, created_at, updated_at "
-        "FROM accounts WHERE id = $1",
+        "SELECT a.id, a.amount, a.category, a.type, a.ledger_id, l.name AS ledger_name, "
+        "a.occurred_at, a.note, a.created_at, a.updated_at "
+        "FROM accounts a LEFT JOIN ledgers l ON a.ledger_id = l.id "
+        "WHERE a.id = $1",
         account_id,
     )
     return dict(row) if row else None
@@ -49,14 +179,89 @@ async def list_accounts(
     offset: int = 0,
     category: Optional[str] = None,
     type: Optional[str] = None,
+    ledger_id: Optional[int] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
 ) -> list[dict]:
-    """查询账目列表，支持按分类、类型、时间范围筛选"""
-    query = "SELECT id, amount, category, type, occurred_at, note, created_at, updated_at FROM accounts WHERE 1=1"
+    """查询账目列表，支持按账本、分类、类型、时间范围筛选"""
+    query = ("SELECT a.id, a.amount, a.category, a.type, a.ledger_id, l.name AS ledger_name, "
+             "a.occurred_at, a.note, a.created_at, a.updated_at "
+             "FROM accounts a LEFT JOIN ledgers l ON a.ledger_id = l.id WHERE 1=1")
     params = []
     idx = 1
 
+    if ledger_id:
+        query += f" AND a.ledger_id = ${idx}"
+        params.append(ledger_id)
+        idx += 1
+    if category:
+        query += f" AND a.category = ${idx}"
+        params.append(category)
+        idx += 1
+    if type:
+        query += f" AND a.type = ${idx}"
+        params.append(type)
+        idx += 1
+    if start_date:
+        query += f" AND a.occurred_at >= ${idx}"
+        params.append(start_date)
+        idx += 1
+    if end_date:
+        query += f" AND a.occurred_at <= ${idx}"
+        params.append(end_date)
+        idx += 1
+
+    query += f" ORDER BY a.occurred_at DESC LIMIT ${idx} OFFSET ${idx + 1}"
+    params.extend([limit, offset])
+
+    rows = await conn.fetch(query, *params)
+    return [dict(row) for row in rows]
+
+
+async def update_account(
+    conn: asyncpg.Connection,
+    account_id: int,
+    **kwargs: Any,
+) -> Optional[dict]:
+    """更新账目记录"""
+    allowed_fields = {"amount", "category", "type", "ledger_id", "occurred_at", "note"}
+    updates = {k: v for k, v in kwargs.items() if k in allowed_fields and v is not None}
+    if not updates:
+        return await get_account(conn, account_id)
+
+    set_clauses = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(updates.keys()))
+    values = [account_id] + list(updates.values())
+    query = (
+        f"UPDATE accounts SET {set_clauses} "
+        f"WHERE id = $1 "
+        f"RETURNING id, amount, category, type, ledger_id, occurred_at, note, created_at, updated_at"
+    )
+    row = await conn.fetchrow(query, *values)
+    return dict(row) if row else None
+
+
+async def delete_account(conn: asyncpg.Connection, account_id: int) -> bool:
+    """删除账目记录"""
+    result = await conn.execute("DELETE FROM accounts WHERE id = $1", account_id)
+    return result.endswith("1")  # DELETE 1 表示成功删除一条
+
+
+async def count_accounts(
+    conn: asyncpg.Connection,
+    category: Optional[str] = None,
+    type: Optional[str] = None,
+    ledger_id: Optional[int] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> int:
+    """查询满足筛选条件的账目总数"""
+    query = "SELECT COUNT(*) FROM accounts WHERE 1=1"
+    params = []
+    idx = 1
+    if ledger_id:
+        query += f" AND ledger_id = ${idx}"
+        params.append(ledger_id)
+        idx += 1
     if category:
         query += f" AND category = ${idx}"
         params.append(category)
@@ -73,40 +278,88 @@ async def list_accounts(
         query += f" AND occurred_at <= ${idx}"
         params.append(end_date)
         idx += 1
-
-    query += f" ORDER BY occurred_at DESC LIMIT ${idx} OFFSET ${idx + 1}"
-    params.extend([limit, offset])
-
-    rows = await conn.fetch(query, *params)
-    return [dict(row) for row in rows]
+    return await conn.fetchval(query, *params)
 
 
-async def update_account(
+async def get_accounts_summary(
     conn: asyncpg.Connection,
-    account_id: int,
-    **kwargs: Any,
-) -> Optional[dict]:
-    """更新账目记录"""
-    allowed_fields = {"amount", "category", "type", "occurred_at", "note"}
-    updates = {k: v for k, v in kwargs.items() if k in allowed_fields and v is not None}
-    if not updates:
-        return await get_account(conn, account_id)
+    ledger_id: Optional[int] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> dict:
+    """
+    查询指定时间范围（和账本）的账目统计摘要
+    返回：总支出、总收入、净额、交易笔数、分类汇总
+    """
+    from datetime import datetime as dt
 
-    set_clauses = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(updates.keys()))
-    values = [account_id] + list(updates.values())
-    query = (
-        f"UPDATE accounts SET {set_clauses} "
-        f"WHERE id = $1 "
-        f"RETURNING id, amount, category, type, occurred_at, note, created_at, updated_at"
+    now = dt.now()
+    if not start_date:
+        start_date = dt(now.year, now.month, 1)
+    if not end_date:
+        end_date = now
+
+    # 构建条件
+    conditions = ["occurred_at BETWEEN $1 AND $2"]
+    params = [start_date, end_date]
+    idx = 3
+    if ledger_id:
+        conditions.append(f"ledger_id = ${idx}")
+        params.append(ledger_id)
+        idx += 1
+    where_clause = " AND ".join(conditions)
+
+    # 总支出和总收入
+    expense_row = await conn.fetchrow(
+        f"SELECT COALESCE(SUM(ABS(amount)), 0) AS total, COUNT(*) AS cnt "
+        f"FROM accounts WHERE type = 'expense' AND {where_clause}",
+        *params,
     )
-    row = await conn.fetchrow(query, *values)
-    return dict(row) if row else None
+    income_row = await conn.fetchrow(
+        f"SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt "
+        f"FROM accounts WHERE type = 'income' AND {where_clause}",
+        *params,
+    )
 
+    # 按分类汇总支出
+    category_rows = await conn.fetch(
+        f"""
+        SELECT category, SUM(ABS(amount)) AS total, COUNT(*) AS count
+        FROM accounts
+        WHERE type = 'expense' AND {where_clause}
+        GROUP BY category ORDER BY total DESC LIMIT 20
+        """,
+        *params,
+    )
 
-async def delete_account(conn: asyncpg.Connection, account_id: int) -> bool:
-    """删除账目记录"""
-    result = await conn.execute("DELETE FROM accounts WHERE id = $1", account_id)
-    return result.endswith("1")  # DELETE 1 表示成功删除一条
+    # 按分类汇总收入
+    income_category_rows = await conn.fetch(
+        f"""
+        SELECT category, SUM(amount) AS total, COUNT(*) AS count
+        FROM accounts
+        WHERE type = 'income' AND {where_clause}
+        GROUP BY category ORDER BY total DESC LIMIT 20
+        """,
+        *params,
+    )
+
+    return {
+        "total_expense": abs(float(expense_row["total"])),
+        "expense_count": int(expense_row["cnt"]),
+        "total_income": float(income_row["total"]),
+        "income_count": int(income_row["cnt"]),
+        "net_amount": float(income_row["total"]) - abs(float(expense_row["total"])),
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "expense_by_category": [
+            {"category": r["category"], "total": round(abs(float(r["total"])), 2), "count": int(r["count"])}
+            for r in category_rows
+        ],
+        "income_by_category": [
+            {"category": r["category"], "total": round(float(r["total"]), 2), "count": int(r["count"])}
+            for r in income_category_rows
+        ],
+    }
 
 
 # ============================================================
@@ -220,6 +473,38 @@ async def get_inventory(conn: asyncpg.Connection, inventory_id: int) -> Optional
         inventory_id,
     )
     return dict(row) if row else None
+
+
+async def count_inventory(
+    conn: asyncpg.Connection,
+    name: Optional[str] = None,
+    category_id: Optional[int] = None,
+    location: Optional[str] = None,
+    barcode: Optional[str] = None,
+) -> int:
+    """查询满足筛选条件的物品总数"""
+    query = "SELECT COUNT(*) FROM inventory WHERE 1=1"
+    params = []
+    idx = 1
+
+    if name:
+        query += f" AND name ILIKE ${idx}"
+        params.append(f"%{name}%")
+        idx += 1
+    if category_id:
+        query += f" AND category_id = ${idx}"
+        params.append(category_id)
+        idx += 1
+    if location:
+        query += f" AND location ILIKE ${idx}"
+        params.append(f"%{location}%")
+        idx += 1
+    if barcode:
+        query += f" AND barcode = ${idx}"
+        params.append(barcode)
+        idx += 1
+
+    return await conn.fetchval(query, *params)
 
 
 async def list_inventory(

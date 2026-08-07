@@ -41,11 +41,30 @@ async def init_db_pool() -> asyncpg.Pool:
 
 async def register_types(conn: asyncpg.Connection):
     """
-    为每个连接注册 pgvector 类型，使 asyncpg 能正确处理 vector 类型
+    为每个连接注册自定义类型：
+    1. pgvector 扩展类型（向量检索）
+    2. JSON/JSONB 编解码器（让 asyncpg 返回 Python dict 而非 str）
     """
-    # 注册 pgvector 扩展类型
+    import json
+
+    # 1. 注册 pgvector 扩展类型
     from pgvector.asyncpg import register_vector
     await register_vector(conn)
+
+    # 2. 注册 JSON/JSONB 编解码器
+    # asyncpg 默认将 JSONB 列返回为字符串，这里注册编解码器使其返回 Python dict/list
+    await conn.set_type_codec(
+        "jsonb",
+        encoder=json.dumps,
+        decoder=json.loads,
+        schema="pg_catalog",
+    )
+    await conn.set_type_codec(
+        "json",
+        encoder=json.dumps,
+        decoder=json.loads,
+        schema="pg_catalog",
+    )
 
 
 async def get_pool() -> asyncpg.Pool:

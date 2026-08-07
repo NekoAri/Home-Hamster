@@ -68,17 +68,25 @@ def step1_check_server():
         cur.execute("SHOW server_encoding;")
         print(f"  📋 服务器编码: {cur.fetchone()[0]}")
 
-        cur.execute("SHOW lc_collate;")
-        print(f"  📋 排序规则: {cur.fetchone()[0]}")
+        try:
+            cur.execute("SHOW lc_collate;")
+            print(f"  📋 排序规则: {cur.fetchone()[0]}")
+        except Exception:
+            print(f"  📋 排序规则: (PostgreSQL 18+ 不再支持 lc_collate 参数)")
 
         # 检查扩展可用性
         cur.execute(
-            "SELECT name, installed FROM pg_available_extensions "
+            "SELECT name FROM pg_available_extensions "
             "WHERE name IN ('vector', 'pg_trgm') ORDER BY name;"
         )
         exts = cur.fetchall()
         ext_names = [e[0] for e in exts]
         print(f"  📋 可用扩展: {ext_names}")
+
+        # 检查已安装扩展
+        cur.execute("SELECT extname FROM pg_extension ORDER BY extname;")
+        installed_exts = [r[0] for r in cur.fetchall()]
+        print(f"  📋 已安装扩展: {installed_exts}")
 
         if "vector" not in ext_names:
             print("  ⚠️  警告: pgvector 扩展不可用！Agent 记忆向量功能将无法使用")
@@ -123,6 +131,129 @@ def step2_create_database():
     conn.close()
 
 
+def split_sql(sql_text):
+    """
+    智能 SQL 分割器，正确处理：
+    - 美元引用 $$ ... $$（不拆分函数体中的分号）
+    - 单引号 ' ... '（不拆分字符串中的分号）
+    - SQL 注释 -- ... （行注释）
+    - 块注释 /* ... */
+    """
+    statements = []
+    current = []
+    i = 0
+    n = len(sql_text)
+    in_single_quote = False
+    in_dollar_quote = False
+    dollar_tag = None
+    in_line_comment = False
+    in_block_comment = False
+
+    while i < n:
+        ch = sql_text[i]
+        nxt = sql_text[i + 1] if i + 1 < n else ""
+
+        # 处理行注释
+        if in_line_comment:
+            current.append(ch)
+            if ch == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+
+        # 处理块注释
+        if in_block_comment:
+            current.append(ch)
+            if ch == "*" and nxt == "/":
+                current.append(nxt)
+                i += 2
+                in_block_comment = False
+                continue
+            i += 1
+            continue
+
+        # 检测注释开始
+        if not in_single_quote and not in_dollar_quote:
+            if ch == "-" and nxt == "-":
+                in_line_comment = True
+                current.append(ch)
+                current.append(nxt)
+                i += 2
+                continue
+            if ch == "/" and nxt == "*":
+                in_block_comment = True
+                current.append(ch)
+                current.append(nxt)
+                i += 2
+                continue
+
+        # 处理美元引用
+        if not in_single_quote and not in_block_comment:
+            if not in_dollar_quote and ch == "$":
+                # 尝试匹配 $$ 或 $tag$
+                j = i + 1
+                while j < n and (sql_text[j].isalnum() or sql_text[j] == "_"):
+                    j += 1
+                if j < n and sql_text[j] == "$":
+                    tag = sql_text[i:j + 1]  # $$ or $tag$
+                    dollar_tag = tag
+                    in_dollar_quote = True
+                    current.append(tag)
+                    i = j + 1
+                    continue
+            elif in_dollar_quote:
+                # 检查是否是结束标签
+                if ch == "$":
+                    j = i + 1
+                    while j < n and (sql_text[j].isalnum() or sql_text[j] == "_"):
+                        j += 1
+                    if j < n and sql_text[j] == "$":
+                        tag = sql_text[i:j + 1]
+                        if tag == dollar_tag:
+                            current.append(tag)
+                            i = j + 1
+                            in_dollar_quote = False
+                            dollar_tag = None
+                            continue
+
+        # 处理单引号
+        if ch == "'" and not in_dollar_quote and not in_block_comment:
+            if in_single_quote:
+                # 检查是否是转义的单引号 ''
+                if nxt == "'":
+                    current.append(ch)
+                    current.append(nxt)
+                    i += 2
+                    continue
+                else:
+                    in_single_quote = False
+            else:
+                in_single_quote = True
+            current.append(ch)
+            i += 1
+            continue
+
+        # 分号分割（不在引号/美元引用/注释中）
+        if ch == ";" and not in_single_quote and not in_dollar_quote and not in_line_comment and not in_block_comment:
+            current.append(ch)
+            stmt = "".join(current).strip()
+            if stmt:
+                statements.append(stmt)
+            current = []
+            i += 1
+            continue
+
+        current.append(ch)
+        i += 1
+
+    # 最后一条语句
+    stmt = "".join(current).strip()
+    if stmt:
+        statements.append(stmt)
+
+    return statements
+
+
 def step3_init_tables():
     """步骤3: 执行建表 SQL"""
     print()
@@ -142,14 +273,15 @@ def step3_init_tables():
     conn.autocommit = True
     cur = conn.cursor()
 
-    # 逐条执行 SQL（更安全，能跳过已存在对象）
-    # 先按分号拆分，过滤掉注释和空语句
-    raw_statements = sql_content.split(";")
+    # 使用智能 SQL 分割器（正确处理 $$ 美元引用）
+    statements = split_sql(sql_content)
+    print(f"  📄 解析出 {len(statements)} 条 SQL 语句")
+
     success_count = 0
     skip_count = 0
     error_count = 0
 
-    for stmt in raw_statements:
+    for stmt in statements:
         stmt = stmt.strip()
         if not stmt:
             continue
@@ -158,7 +290,7 @@ def step3_init_tables():
         if not lines:
             continue
         try:
-            cur.execute(stmt + ";")
+            cur.execute(stmt)
             success_count += 1
         except pg8000.Error as e:
             err_msg = str(e)

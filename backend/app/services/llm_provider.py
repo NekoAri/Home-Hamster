@@ -66,6 +66,12 @@ class LLMResponse:
     tool_calls: list[ToolCallResult] = field(default_factory=list)  # 工具调用列表
 
 
+@dataclass
+class StreamResult:
+    """流式响应结果持有者（用于在流式输出中收集工具调用）"""
+    tool_calls: list[ToolCallResult] = field(default_factory=list)
+
+
 # ============================================================
 # 抽象基类
 # ============================================================
@@ -98,6 +104,23 @@ class LLMProvider(ABC):
         不携带工具定义，用于工具执行后的最终回复
         """
         ...
+
+    async def chat_stream_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        result: "StreamResult",
+    ) -> AsyncGenerator[str, None]:
+        """
+        流式输出 + 工具调用检测（一体化）
+
+        文本 token 通过 yield 实时返回，工具调用存入 result.tool_calls。
+        默认实现：非流式调用后一次性返回（子类可覆写为真正的流式）。
+        """
+        response = await self.chat_with_tools(messages, tools)
+        result.tool_calls = response.tool_calls
+        if response.content:
+            yield response.content
 
     async def execute_tool_calls(self, tool_calls: list[ToolCallResult]) -> list[dict]:
         """
@@ -149,9 +172,15 @@ class OpenAICompatibleProvider(LLMProvider):
         base_url = self.config.base_url or self.DEFAULT_BASE_URLS.get(
             self.config.provider, ""
         )
+        # 本地模型（Ollama/自定义局域网）推理较慢，设较长超时
+        is_local = self.config.provider in ("ollama", "custom") or (
+            base_url and ("localhost" in base_url or "192.168." in base_url or "127.0.0.1" in base_url)
+        )
         return AsyncOpenAI(
             api_key=self.config.api_key or "dummy",  # Ollama 等本地模型无需 key
             base_url=base_url if base_url else None,
+            timeout=300.0 if is_local else 60.0,  # 本地5分钟，云服务1分钟
+            max_retries=1,  # 减少重试，避免本地服务异常时长时间卡住
         )
 
     async def chat_with_tools(
@@ -205,6 +234,104 @@ class OpenAICompatibleProvider(LLMProvider):
         async for chunk in stream:
             if chunk.choices[0].delta.content is not None:
                 yield chunk.choices[0].delta.content
+
+    async def chat_stream_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        result: "StreamResult",
+    ) -> AsyncGenerator[str, None]:
+        """
+        流式输出 + 工具调用检测（一体化）
+
+        使用 OpenAI stream=True + tools 参数，文字 token 实时 yield，
+        工具调用 delta 在流中收集，流结束后存入 result.tool_calls。
+        避免非流式第一轮请求导致连接超时。
+
+        回退机制：如果流式响应既没有文本内容也没有工具调用，
+        可能是模型/服务器不支持流式工具调用，自动回退到非流式请求。
+        """
+        client = self._get_client()
+        stream = await client.chat.completions.create(
+            model=self.config.model_name,
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+            stream=True,
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens,
+        )
+
+        # 工具调用 delta 累积器: index -> {id, name, arguments}
+        tool_acc: dict[int, dict] = {}
+        has_content = False
+
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+
+            # 流式输出文本
+            if delta.content:
+                has_content = True
+                yield delta.content
+
+            # 收集工具调用 delta
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    idx = tc.index
+                    if idx not in tool_acc:
+                        tool_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                    if tc.id:
+                        tool_acc[idx]["id"] = tc.id
+                    if tc.function and tc.function.name:
+                        tool_acc[idx]["name"] = tc.function.name
+                    if tc.function and tc.function.arguments:
+                        tool_acc[idx]["arguments"] += tc.function.arguments
+
+        # 流结束后，构建完整的工具调用列表
+        for idx in sorted(tool_acc.keys()):
+            tc = tool_acc[idx]
+            if tc["id"] and tc["name"]:
+                try:
+                    args = json.loads(tc["arguments"]) if tc["arguments"] else {}
+                except json.JSONDecodeError:
+                    logger.warning(f"工具调用参数 JSON 解析失败: {tc['arguments']}")
+                    args = {}
+                result.tool_calls.append(ToolCallResult(
+                    id=tc["id"],
+                    name=tc["name"],
+                    arguments=args,
+                ))
+                logger.info(f"🔧 流式检测到工具调用: {tc['name']}({args})")
+
+        # 回退：流式响应既无文本也无工具调用 → 尝试非流式
+        if not has_content and not result.tool_calls:
+            logger.warning("⚠️ 流式响应无内容无工具调用，回退到非流式请求...")
+            try:
+                response = await client.chat.completions.create(
+                    model=self.config.model_name,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto",
+                    temperature=self.config.temperature,
+                    max_tokens=self.config.max_tokens,
+                )
+                msg = response.choices[0].message
+                if msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                        result.tool_calls.append(ToolCallResult(
+                            id=tc.id,
+                            name=tc.function.name,
+                            arguments=args,
+                        ))
+                        logger.info(f"🔧 非流式检测到工具调用: {tc.function.name}({args})")
+                if msg.content:
+                    yield msg.content
+            except Exception as e:
+                logger.error(f"非流式回退请求失败: {e}")
+                raise
 
 
 # ============================================================

@@ -12,11 +12,52 @@ from typing import Optional, Any
 # 账目相关 Schema
 # ============================================================
 
+class LedgerCreate(BaseModel):
+    """创建账本请求"""
+    name: str = Field(..., max_length=100, description="账本名称")
+    icon: str = Field("📔", max_length=20, description="账本图标(emoji)")
+    color: str = Field("orange", max_length=20, description="显示颜色")
+    description: Optional[str] = Field(None, description="账本描述")
+    is_default: bool = Field(False, description="是否设为默认账本")
+    sort_order: int = Field(0, description="排序权重")
+
+
+class LedgerUpdate(BaseModel):
+    """更新账本请求"""
+    name: Optional[str] = Field(None, max_length=100)
+    icon: Optional[str] = Field(None, max_length=20)
+    color: Optional[str] = Field(None, max_length=20)
+    description: Optional[str] = None
+    is_default: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
+class LedgerResponse(BaseModel):
+    """账本响应"""
+    id: int
+    name: str
+    icon: str
+    color: str
+    description: Optional[str]
+    is_default: bool
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class LedgerWithStatsResponse(LedgerResponse):
+    """账本响应（含统计信息）"""
+    record_count: int = 0
+    total_expense: float = 0.0
+    total_income: float = 0.0
+
+
 class AccountCreate(BaseModel):
     """创建账目请求"""
     amount: float = Field(..., description="金额（正数收入，负数支出）")
     category: str = Field(..., max_length=50, description="分类")
     type: str = Field("expense", description="类型: expense(支出) / income(收入)")
+    ledger_id: Optional[int] = Field(None, description="所属账本ID，不传则用默认账本")
     occurred_at: Optional[datetime] = Field(None, description="发生时间，默认当前时间")
     note: Optional[str] = Field(None, description="备注")
 
@@ -26,6 +67,7 @@ class AccountUpdate(BaseModel):
     amount: Optional[float] = None
     category: Optional[str] = Field(None, max_length=50)
     type: Optional[str] = None
+    ledger_id: Optional[int] = None
     occurred_at: Optional[datetime] = None
     note: Optional[str] = None
 
@@ -36,6 +78,8 @@ class AccountResponse(BaseModel):
     amount: float
     category: str
     type: str
+    ledger_id: int
+    ledger_name: Optional[str] = None
     occurred_at: datetime
     note: Optional[str]
     created_at: datetime

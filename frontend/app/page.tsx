@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Chat from '@/components/Chat'
 import Dashboard from '@/components/Dashboard'
 import Settings from '@/components/Settings'
@@ -18,14 +18,10 @@ type Mode = 'agent' | 'normal'
  * 模式状态保存在 localStorage 中，刷新后保持上次选择
  */
 export default function Home() {
-  // 初始化模式：优先读 localStorage，默认 Agent 模式
-  const [mode, setMode] = useState<Mode>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('hh-mode')
-      return saved === 'normal' ? 'normal' : 'agent'
-    }
-    return 'agent'
-  })
+  // 初始模式固定为 'agent'，避免 SSR/CSR 不一致导致 hydration error
+  const [mode, setMode] = useState<Mode>('agent')
+  // 标记是否已从 localStorage 恢复模式（hydration 后才读）
+  const [modeLoaded, setModeLoaded] = useState(false)
 
   // 设置弹窗
   const [showSettings, setShowSettings] = useState(false)
@@ -34,6 +30,15 @@ export default function Home() {
     name: 'HomeHamster',
     avatar: '🐹',
   })
+
+  // hydration 后从 localStorage 恢复上次选择的模式
+  useEffect(() => {
+    const saved = localStorage.getItem('hh-mode')
+    if (saved === 'normal') {
+      setMode('normal')
+    }
+    setModeLoaded(true)
+  }, [])
 
   // 切换模式
   const handleModeSwitch = (newMode: Mode) => {
@@ -112,7 +117,15 @@ export default function Home() {
 
       {/* ===== 主内容区 ===== */}
       <div className="flex-1 overflow-hidden">
-        {mode === 'agent' ? (
+        {!modeLoaded ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="flex gap-1">
+              <span className="inline-block w-2.5 h-2.5 bg-orange-300 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="inline-block w-2.5 h-2.5 bg-orange-300 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="inline-block w-2.5 h-2.5 bg-orange-300 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+          </div>
+        ) : mode === 'agent' ? (
           <Chat embedded />
         ) : (
           <Dashboard />

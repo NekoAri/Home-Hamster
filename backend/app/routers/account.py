@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/accounts", tags=["账目管理"])
 
 @router.post("", response_model=AccountResponse, summary="创建账目")
 async def create_account(account: AccountCreate):
-    """添加一条账目记录（支出或收入）"""
+    """添加一条账目记录（支出或收入），可指定账本"""
     pool = await get_pool()
     async with pool.acquire() as conn:
         record = await crud.create_account(
@@ -23,6 +23,7 @@ async def create_account(account: AccountCreate):
             amount=account.amount,
             category=account.category,
             type=account.type,
+            ledger_id=account.ledger_id,
             occurred_at=account.occurred_at,
             note=account.note,
         )
@@ -35,15 +36,17 @@ async def list_accounts(
     offset: int = Query(0, ge=0),
     category: Optional[str] = Query(None, description="按分类筛选"),
     type: Optional[str] = Query(None, description="按类型筛选: expense/income"),
+    ledger_id: Optional[int] = Query(None, description="按账本筛选"),
     start_date: Optional[datetime] = Query(None, description="开始时间"),
     end_date: Optional[datetime] = Query(None, description="结束时间"),
 ):
-    """查询账目列表，支持按分类、类型、时间范围筛选"""
+    """查询账目列表，支持按账本、分类、类型、时间范围筛选"""
     pool = await get_pool()
     async with pool.acquire() as conn:
         return await crud.list_accounts(
             conn, limit=limit, offset=offset,
             category=category, type=type,
+            ledger_id=ledger_id,
             start_date=start_date, end_date=end_date,
         )
 

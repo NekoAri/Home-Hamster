@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import init_db_pool, close_db_pool
 from app.services.agent_manager import AgentManager
-from app.routers import agent, account, inventory, category, config, summary, session
+from app.routers import agent, account, inventory, category, config, summary, session, ledger
 
 # 日志配置
 logging.basicConfig(
@@ -64,6 +64,7 @@ app.include_router(agent.router)       # Agent 对话（SSE 流式）
 app.include_router(session.router)     # 对话会话管理 [v3 新增]
 app.include_router(config.router)     # 配置管理（LLM + Agent 人设，变更时热重载）
 app.include_router(account.router)     # 账目 CRUD
+app.include_router(ledger.router)      # 账本 CRUD（多账本分账管理）
 app.include_router(inventory.router)   # 物品仓储 CRUD
 app.include_router(category.router)    # 物品类别 CRUD
 app.include_router(summary.router)     # 统计概览（仪表盘数据）

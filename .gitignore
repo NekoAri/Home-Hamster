@@ -11,6 +11,9 @@ venv/
 dist/
 build/
 
+# Next.js 自动生成
+next-env.d.ts
+
 # IDE
 .vscode/
 .idea/

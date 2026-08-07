@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   listInventory, countInventory, createInventory, updateInventory, deleteInventory,
   listCategories,
@@ -82,15 +82,18 @@ export default function InventoryView() {
     return categories.find((c) => c.id === categoryId)?.name || '未分类'
   }
 
+  // 固定时间戳，避免 SSR/CSR 渲染时 Date.now() 不一致导致 hydration error
+  const nowTs = useMemo(() => Date.now(), [])
+
   // 检查是否临期（30天内）
   const isExpiringSoon = (dateStr: string | null) => {
     if (!dateStr) return false
-    const diff = new Date(dateStr).getTime() - Date.now()
+    const diff = new Date(dateStr).getTime() - nowTs
     return diff < 30 * 24 * 60 * 60 * 1000
   }
   const isExpired = (dateStr: string | null) => {
     if (!dateStr) return false
-    return new Date(dateStr).getTime() < Date.now()
+    return new Date(dateStr).getTime() < nowTs
   }
 
   return (

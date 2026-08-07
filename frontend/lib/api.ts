@@ -74,11 +74,31 @@ export interface SessionMessagesResponse {
 
 // ---- 账目相关类型 ----
 
+export interface Ledger {
+  id: number
+  name: string
+  icon: string
+  color: string
+  description: string | null
+  is_default: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface LedgerWithStats extends Ledger {
+  record_count: number
+  total_expense: number
+  total_income: number
+}
+
 export interface Account {
   id: number
   amount: number
   category: string
   type: string  // 'expense' | 'income'
+  ledger_id: number
+  ledger_name?: string | null
   occurred_at: string
   note: string | null
   created_at: string
@@ -90,6 +110,7 @@ export interface AccountQueryParams {
   offset?: number
   category?: string
   type?: string
+  ledger_id?: number
   start_date?: string
   end_date?: string
 }
@@ -251,6 +272,39 @@ export async function activateAgentConfig(id: number): Promise<{ message: string
 }
 
 // ============================================================
+// 账本 CRUD API
+// ============================================================
+
+export async function listLedgers(withStats: boolean = false): Promise<LedgerWithStats[]> {
+  return apiFetch(`/api/ledgers${buildQuery({ with_stats: withStats })}`)
+}
+
+export async function createLedger(data: {
+  name: string
+  icon?: string
+  color?: string
+  description?: string
+  is_default?: boolean
+  sort_order?: number
+}): Promise<Ledger> {
+  return apiFetch('/api/ledgers', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateLedger(id: number, data: Partial<Ledger>): Promise<Ledger> {
+  return apiFetch(`/api/ledgers/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function deleteLedger(id: number): Promise<{ message: string }> {
+  return apiFetch(`/api/ledgers/${id}`, { method: 'DELETE' })
+}
+
+// ============================================================
 // 账目 CRUD API
 // ============================================================
 
@@ -266,6 +320,7 @@ export async function createAccount(data: {
   amount: number
   category: string
   type?: string
+  ledger_id?: number
   occurred_at?: string
   note?: string
 }): Promise<Account> {

@@ -27,18 +27,37 @@ CREATE INDEX IF NOT EXISTS idx_item_categories_name_trgm
     ON item_categories USING gin (name gin_trgm_ops);
 
 -- ============================================================
--- 2. 账目表（accounts）
+-- 2. 账本表（ledgers）
+--    支持多账本分账管理，如日常开销、家庭公共、旅行基金等
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ledgers (
+    id          BIGSERIAL PRIMARY KEY,
+    name        VARCHAR(100)   NOT NULL,                   -- 账本名称
+    icon        VARCHAR(20)     DEFAULT '📔',               -- 账本图标(emoji)
+    color       VARCHAR(20)     DEFAULT 'orange',           -- 显示颜色
+    description TEXT,                                        -- 账本描述
+    is_default  BOOLEAN         NOT NULL DEFAULT FALSE,     -- 是否默认账本
+    sort_order  INTEGER         NOT NULL DEFAULT 0,         -- 排序权重
+    created_at  TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+
+-- ============================================================
+-- 3. 账目表（accounts）
 --    记录家庭收支流水，包含金额、分类、时间、备注等
+--    ledger_id 关联账本，实现多账本分账管理
 -- ============================================================
 CREATE TABLE IF NOT EXISTS accounts (
     id          BIGSERIAL PRIMARY KEY,
     amount      NUMERIC(12, 2) NOT NULL,              -- 金额（正数为收入，负数为支出）
     category    VARCHAR(50)    NOT NULL,              -- 分类（如 餐饮/交通/工资/购物 等）
     type        VARCHAR(10)    NOT NULL DEFAULT 'expense', -- 类型: expense(支出) / income(收入)
+    ledger_id   BIGINT          NOT NULL DEFAULT 1,    -- 所属账本ID（外键 -> ledgers.id）
     occurred_at TIMESTAMPTZ   NOT NULL DEFAULT NOW(), -- 发生时间
     note        TEXT,                                 -- 备注
     created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+    updated_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    CONSTRAINT fk_accounts_ledger FOREIGN KEY (ledger_id) REFERENCES ledgers(id) ON DELETE RESTRICT
 );
 
 -- 为账目时间建立索引，便于按时间段查询
@@ -52,6 +71,10 @@ CREATE INDEX IF NOT EXISTS idx_accounts_category
 -- 为账目类型建立索引，便于区分收支
 CREATE INDEX IF NOT EXISTS idx_accounts_type
     ON accounts (type);
+
+-- 为账目账本建立索引，便于按账本筛选
+CREATE INDEX IF NOT EXISTS idx_accounts_ledger_id
+    ON accounts (ledger_id);
 
 -- ============================================================
 -- 3. 物品仓储表（inventory）
@@ -146,6 +169,10 @@ $$ LANGUAGE plpgsql;
 -- 为各表创建 updated_at 自动更新触发器
 CREATE TRIGGER trigger_item_categories_updated_at
     BEFORE UPDATE ON item_categories
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER trigger_ledgers_updated_at
+    BEFORE UPDATE ON ledgers
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER trigger_accounts_updated_at

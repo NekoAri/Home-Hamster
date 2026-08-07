@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   listAccounts, countAccounts, createAccount, updateAccount, deleteAccount,
-  type Account, type AccountQueryParams,
+  listLedgers, createLedger,
+  type Account, type AccountQueryParams, type Ledger,
 } from '@/lib/api'
 
 const PAGE_SIZE = 20
@@ -12,8 +13,8 @@ const PAGE_SIZE = 20
  * 账目管理视图
  *
  * 功能：
- * - 表格展示账目记录（日期、分类、类型、金额、备注）
- * - 按分类、类型、日期范围筛选
+ * - 表格展示账目记录（日期、分类、类型、账本、金额、备注）
+ * - 按账本、分类、类型、日期范围筛选
  * - 分页
  * - 新增/编辑/删除账目
  */
@@ -22,6 +23,7 @@ export default function AccountView() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [ledgers, setLedgers] = useState<Ledger[]>([])
 
   // 筛选条件
   const [filters, setFilters] = useState<AccountQueryParams>({
@@ -34,6 +36,17 @@ export default function AccountView() {
   const [editing, setEditing] = useState<Account | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Account | null>(null)
+  const [showLedgerForm, setShowLedgerForm] = useState(false)
+
+  // 加载账本列表
+  const loadLedgers = useCallback(async () => {
+    try {
+      const data = await listLedgers(true)
+      setLedgers(data)
+    } catch (err) {
+      console.error('加载账本失败:', err)
+    }
+  }, [])
 
   // 加载数据
   const loadData = useCallback(async () => {
@@ -54,19 +67,84 @@ export default function AccountView() {
   }, [filters, page])
 
   useEffect(() => {
+    loadLedgers()
+  }, [loadLedgers])
+
+  useEffect(() => {
     loadData()
   }, [loadData])
 
   // 筛选变化时重置页码
   const handleFilterChange = (key: keyof AccountQueryParams, value: string) => {
     setPage(0)
-    setFilters((prev) => ({ ...prev, [key]: value || undefined }))
+    if (key === 'ledger_id') {
+      setFilters((prev) => ({ ...prev, ledger_id: value ? Number(value) : undefined }))
+    } else {
+      setFilters((prev) => ({ ...prev, [key]: value || undefined }))
+    }
   }
 
   const totalPages = Math.ceil(total / PAGE_SIZE) || 1
 
+  // 获取账本名称
+  const getLedgerName = (ledgerId?: number, ledgerName?: string | null) => {
+    if (ledgerName) return ledgerName
+    const ledger = ledgers.find((l) => l.id === ledgerId)
+    return ledger ? ledger.name : '未知'
+  }
+
+  // 获取账本图标
+  const getLedgerIcon = (ledgerId?: number) => {
+    const ledger = ledgers.find((l) => l.id === ledgerId)
+    return ledger ? ledger.icon : '📔'
+  }
+
   return (
     <div className="space-y-4">
+      {/* ===== 账本切换栏 ===== */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+        {ledgers.map((ledger) => {
+          const isActive = filters.ledger_id === ledger.id
+          const isAll = !filters.ledger_id && ledger.is_default && false // skip
+          return (
+            <button
+              key={ledger.id}
+              onClick={() => handleFilterChange('ledger_id', isActive ? '' : String(ledger.id))}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm whitespace-nowrap transition-all ${
+                isActive
+                  ? 'bg-orange-500 text-white shadow-sm'
+                  : 'bg-white text-gray-600 hover:bg-orange-50 border border-gray-200'
+              }`}
+            >
+              <span>{ledger.icon}</span>
+              <span>{ledger.name}</span>
+              {ledger.is_default && (
+                <span className={`text-xs ${isActive ? 'text-orange-100' : 'text-gray-400'}`}>★</span>
+              )}
+            </button>
+          )
+        })}
+        <button
+          onClick={() => handleFilterChange('ledger_id', '')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm whitespace-nowrap transition-all ${
+            !filters.ledger_id
+              ? 'bg-orange-500 text-white shadow-sm'
+              : 'bg-white text-gray-600 hover:bg-orange-50 border border-gray-200'
+          }`}
+        >
+          全部账本
+        </button>
+        <button
+          onClick={() => setShowLedgerForm(true)}
+          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-white text-orange-600 hover:bg-orange-50 border border-orange-200 whitespace-nowrap transition-all"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          新建账本
+        </button>
+      </div>
+
       {/* ===== 筛选栏 ===== */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
         <div className="flex flex-wrap gap-3 items-end">
@@ -162,6 +240,7 @@ export default function AccountView() {
                 <thead>
                   <tr className="bg-gray-50 text-gray-500 text-xs">
                     <th className="px-4 py-3 text-left font-medium">日期</th>
+                    <th className="px-4 py-3 text-left font-medium">账本</th>
                     <th className="px-4 py-3 text-left font-medium">分类</th>
                     <th className="px-4 py-3 text-left font-medium">类型</th>
                     <th className="px-4 py-3 text-right font-medium">金额</th>
@@ -174,6 +253,9 @@ export default function AccountView() {
                     <tr key={item.id} className="hover:bg-orange-50/50 transition-colors">
                       <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
                         {new Date(item.occurred_at).toLocaleDateString('zh-CN')}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                        {getLedgerIcon(item.ledger_id)} {getLedgerName(item.ledger_id, item.ledger_name)}
                       </td>
                       <td className="px-4 py-3 text-gray-700">{item.category}</td>
                       <td className="px-4 py-3">
@@ -237,6 +319,7 @@ export default function AccountView() {
                   </div>
                   <div className="flex items-center justify-between text-xs text-gray-400">
                     <span>{new Date(item.occurred_at).toLocaleDateString('zh-CN')}</span>
+                    <span>{getLedgerIcon(item.ledger_id)} {getLedgerName(item.ledger_id, item.ledger_name)}</span>
                     <span className={`px-2 py-0.5 rounded-full ${
                       item.type === 'expense' ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-500'
                     }`}>
@@ -292,8 +375,17 @@ export default function AccountView() {
       {showForm && (
         <AccountForm
           account={editing}
+          ledgers={ledgers}
           onClose={() => setShowForm(false)}
-          onSaved={() => { setShowForm(false); loadData() }}
+          onSaved={() => { setShowForm(false); loadData(); loadLedgers() }}
+        />
+      )}
+
+      {/* ===== 新建账本弹窗 ===== */}
+      {showLedgerForm && (
+        <LedgerForm
+          onClose={() => setShowLedgerForm(false)}
+          onSaved={() => { setShowLedgerForm(false); loadLedgers() }}
         />
       )}
 
@@ -308,6 +400,7 @@ export default function AccountView() {
               await deleteAccount(deleteTarget.id)
               setDeleteTarget(null)
               loadData()
+              loadLedgers()
             } catch (err) {
               alert('删除失败: ' + (err as Error).message)
             }
@@ -324,18 +417,22 @@ export default function AccountView() {
 
 function AccountForm({
   account,
+  ledgers,
   onClose,
   onSaved,
 }: {
   account: Account | null
+  ledgers: Ledger[]
   onClose: () => void
   onSaved: () => void
 }) {
   const isEdit = !!account
+  const defaultLedger = ledgers.find((l) => l.is_default) || ledgers[0]
   const [form, setForm] = useState({
     amount: account ? Math.abs(account.amount).toString() : '',
     category: account?.category || '',
     type: account?.type || 'expense',
+    ledger_id: account?.ledger_id || defaultLedger?.id || 0,
     occurred_at: account ? account.occurred_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
     note: account?.note || '',
   })
@@ -351,10 +448,14 @@ function AccountForm({
       if (isNaN(amount) || amount <= 0) {
         throw new Error('金额必须大于 0')
       }
+      if (!form.ledger_id) {
+        throw new Error('请选择账本')
+      }
       const data = {
         amount: form.type === 'expense' ? -amount : amount,
         category: form.category.trim(),
         type: form.type,
+        ledger_id: form.ledger_id,
         occurred_at: `${form.occurred_at}T${new Date().toTimeString().slice(0, 8)}`,
         note: form.note.trim() || undefined,
       }
@@ -400,6 +501,28 @@ function AccountForm({
                 {t === 'expense' ? '💸 支出' : '💰 收入'}
               </button>
             ))}
+          </div>
+
+          {/* 账本选择 */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">账本 *</label>
+            <div className="flex flex-wrap gap-2">
+              {ledgers.map((l) => (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => setForm({ ...form, ledger_id: l.id })}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                    form.ledger_id === l.id
+                      ? 'bg-orange-500 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  <span>{l.icon}</span>
+                  <span>{l.name}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* 金额 */}
@@ -486,6 +609,170 @@ function AccountForm({
               className="flex-1 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-sm font-medium transition-colors"
             >
               {saving ? '保存中...' : isEdit ? '更新' : '添加'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// 新建账本弹窗
+// ============================================================
+
+const LEDGER_ICONS = ['📔', '🍔', '🏠', '✈️', '📚', '📈', '🎮', '🏥', '🎁', '💰']
+const LEDGER_COLORS = ['orange', 'blue', 'purple', 'green', 'teal', 'red', 'pink', 'indigo', 'amber', 'gray']
+
+function LedgerForm({
+  onClose,
+  onSaved,
+}: {
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [form, setForm] = useState({
+    name: '',
+    icon: '📔',
+    color: 'orange',
+    description: '',
+    is_default: false,
+    sort_order: 99,
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      if (!form.name.trim()) {
+        throw new Error('账本名称不能为空')
+      }
+      await createLedger({
+        name: form.name.trim(),
+        icon: form.icon,
+        color: form.color,
+        description: form.description.trim() || undefined,
+        is_default: form.is_default,
+        sort_order: form.sort_order,
+      })
+      onSaved()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-lg font-bold text-gray-800 mb-4">新建账本</h2>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* 账本名称 */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">账本名称 *</label>
+            <input
+              type="text"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              required
+              maxLength={100}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+              placeholder="如：日常开销、旅行基金"
+            />
+          </div>
+
+          {/* 图标选择 */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">图标</label>
+            <div className="flex flex-wrap gap-2">
+              {LEDGER_ICONS.map((icon) => (
+                <button
+                  key={icon}
+                  type="button"
+                  onClick={() => setForm({ ...form, icon })}
+                  className={`w-9 h-9 rounded-lg flex items-center justify-center text-lg transition-all ${
+                    form.icon === icon
+                      ? 'bg-orange-500 ring-2 ring-orange-300'
+                      : 'bg-gray-100 hover:bg-gray-200'
+                  }`}
+                >
+                  {icon}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 颜色选择 */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">颜色</label>
+            <div className="flex flex-wrap gap-2">
+              {LEDGER_COLORS.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  onClick={() => setForm({ ...form, color })}
+                  className={`w-8 h-8 rounded-lg transition-all ${
+                    form.color === color ? 'ring-2 ring-gray-400 ring-offset-1' : ''
+                  } bg-${color}-400`}
+                  style={{
+                    backgroundColor: form.color === color ? undefined : undefined,
+                  }}
+                >
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 描述 */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">描述</label>
+            <textarea
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              rows={2}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 resize-none"
+              placeholder="可选..."
+            />
+          </div>
+
+          {/* 设为默认 */}
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.is_default}
+              onChange={(e) => setForm({ ...form, is_default: e.target.checked })}
+              className="w-4 h-4 rounded border-gray-300 text-orange-500 focus:ring-orange-300"
+            />
+            <span className="text-sm text-gray-600">设为默认账本</span>
+          </label>
+
+          {error && (
+            <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{error}</p>
+          )}
+
+          {/* 操作按钮 */}
+          <div className="flex gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm font-medium transition-colors"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex-1 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            >
+              {saving ? '保存中...' : '创建'}
             </button>
           </div>
         </form>

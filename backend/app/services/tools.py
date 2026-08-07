@@ -5,6 +5,7 @@ HomeHamster Agent 工具服务
 
 from app.services import crud
 from app.database import get_pool
+from datetime import datetime, date
 import logging
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ async def add_expense(
     category: str,
     note: str = "",
     expense_type: str = "expense",
+    ledger_name: str = "",
 ) -> str:
     """
     添加一条账目记录（支出或收入）
@@ -29,6 +31,7 @@ async def add_expense(
         category: 分类（如 餐饮/交通/工资/购物 等）
         note: 备注信息
         expense_type: 类型，expense(支出) 或 income(收入)
+        ledger_name: 账本名称（如"日常开销"、"旅行基金"等），为空则记到默认账本
 
     Returns:
         操作结果描述
@@ -36,6 +39,17 @@ async def add_expense(
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
+            # 解析账本
+            ledger_id = None
+            ledger_label = "默认账本"
+            if ledger_name:
+                ledger = await crud.get_ledger_by_name(conn, ledger_name)
+                if ledger:
+                    ledger_id = ledger["id"]
+                    ledger_label = f"{ledger['icon']} {ledger['name']}"
+                else:
+                    return f"❌ 未找到名为「{ledger_name}」的账本，请先创建账本或使用正确的账本名称。"
+
             # 如果是支出，金额转为负数存储
             actual_amount = -abs(amount) if expense_type == "expense" else abs(amount)
             record = await crud.create_account(
@@ -43,6 +57,7 @@ async def add_expense(
                 amount=actual_amount,
                 category=category,
                 type=expense_type,
+                ledger_id=ledger_id,
                 note=note,
             )
             return (
@@ -50,12 +65,158 @@ async def add_expense(
                 f"  - 类型: {'支出' if expense_type == 'expense' else '收入'}\n"
                 f"  - 金额: ¥{abs(amount):.2f}\n"
                 f"  - 分类: {category}\n"
+                f"  - 账本: {ledger_label}\n"
                 f"  - 备注: {note or '无'}\n"
                 f"  - 记录ID: {record['id']}"
             )
     except Exception as e:
         logger.error(f"添加账目失败: {e}")
         return f"❌ 添加账目失败: {str(e)}"
+
+
+async def check_expense(
+    start_date: str = "",
+    end_date: str = "",
+    category: str = "",
+    expense_type: str = "",
+    ledger_name: str = "",
+    limit: int = 50,
+) -> str:
+    """
+    查询家庭账目记录和消费统计
+
+    Args:
+        start_date: 开始日期（格式 YYYY-MM-DD），为空则默认本月1号
+        end_date: 结束日期（格式 YYYY-MM-DD），为空则默认今天
+        category: 账目分类筛选（如餐饮、交通等），为空则查全部分类
+        expense_type: 类型筛选：expense(仅支出) 或 income(仅收入)，为空则查全部
+        ledger_name: 账本名称筛选（如"日常开销"、"旅行基金"等），为空则查全部账本
+        limit: 返回明细记录数量上限，默认50
+
+    Returns:
+        账目统计摘要 + 明细列表的格式化字符串
+    """
+    try:
+        # 解析日期参数
+        from datetime import datetime as dt
+
+        now = dt.now()
+        dt_start = None
+        dt_end = None
+
+        if start_date:
+            try:
+                dt_start = dt.strptime(start_date, "%Y-%m-%d")
+            except ValueError:
+                return f"❌ start_date 格式错误，请使用 YYYY-MM-DD 格式，如 2026-08-01"
+
+        if end_date:
+            try:
+                dt_end = dt.strptime(end_date, "%Y-%m-%d")
+                # 结束日期设为当天结束（23:59:59）
+                dt_end = dt_end.replace(hour=23, minute=59, second=59)
+            except ValueError:
+                return f"❌ end_date 格式错误，请使用 YYYY-MM-DD 格式，如 2026-08-31"
+
+        # 默认查询本月
+        if not dt_start:
+            dt_start = dt(now.year, now.month, 1)
+        if not dt_end:
+            dt_end = now
+
+        type_filter = expense_type if expense_type in ("expense", "income") else None
+        cat_filter = category if category else None
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # 解析账本
+            ledger_id = None
+            ledger_label = "全部账本"
+            if ledger_name:
+                ledger = await crud.get_ledger_by_name(conn, ledger_name)
+                if ledger:
+                    ledger_id = ledger["id"]
+                    ledger_label = f"{ledger['icon']} {ledger['name']}"
+                else:
+                    return f"❌ 未找到名为「{ledger_name}」的账本。可用的账本请通过 list_ledgers 工具查看。"
+
+            # 获取统计摘要
+            summary = await crud.get_accounts_summary(conn, ledger_id=ledger_id, start_date=dt_start, end_date=dt_end)
+
+            # 获取明细列表
+            total_count = await crud.count_accounts(
+                conn,
+                category=cat_filter,
+                type=type_filter,
+                ledger_id=ledger_id,
+                start_date=dt_start,
+                end_date=dt_end,
+            )
+
+            records = await crud.list_accounts(
+                conn,
+                limit=limit,
+                category=cat_filter,
+                type=type_filter,
+                ledger_id=ledger_id,
+                start_date=dt_start,
+                end_date=dt_end,
+            )
+
+        logger.info(
+            f"check_expense 调用: start={dt_start.date()}, end={dt_end.date()}, "
+            f"category={category!r}, type={expense_type!r}, ledger={ledger_name!r} → {total_count} 条记录"
+        )
+
+        # 构建返回文本
+        lines = []
+        lines.append(f"💰 账目统计（{dt_start.strftime('%Y-%m-%d')} ~ {dt_end.strftime('%Y-%m-%d')}）账本: {ledger_label}\n")
+        lines.append(f"  📊 总支出: ¥{summary['total_expense']:.2f}（{summary['expense_count']} 笔）")
+        lines.append(f"  📊 总收入: ¥{summary['total_income']:.2f}（{summary['income_count']} 笔）")
+        lines.append(f"  📊 净额: {'+' if summary['net_amount'] >= 0 else ''}¥{summary['net_amount']:.2f}")
+
+        # 支出分类明细
+        if summary["expense_by_category"]:
+            lines.append(f"\n  📋 支出分类:")
+            for c in summary["expense_by_category"]:
+                pct = (c["total"] / summary["total_expense"] * 100) if summary["total_expense"] > 0 else 0
+                lines.append(f"    • {c['category']}: ¥{c['total']:.2f}（{c['count']} 笔，{pct:.1f}%）")
+
+        # 收入分类明细
+        if summary["income_by_category"]:
+            lines.append(f"\n  📋 收入分类:")
+            for c in summary["income_by_category"]:
+                lines.append(f"    • {c['category']}: ¥{c['total']:.2f}（{c['count']} 笔）")
+
+        # 明细列表
+        if records:
+            lines.append(f"\n📝 明细记录（共 {total_count} 条，显示 {len(records)} 条）:")
+            for r in records:
+                amt = abs(float(r["amount"]))
+                type_label = "支出" if r["type"] == "expense" else "收入"
+                occurred = r["occurred_at"]
+                if hasattr(occurred, "strftime"):
+                    occurred_str = occurred.strftime("%m-%d %H:%M")
+                else:
+                    occurred_str = str(occurred)[:11]
+                note_str = f" | 备注: {r['note']}" if r.get("note") else ""
+                ledger_str = f" | 账本: {r.get('ledger_name', '?')}" if not ledger_id else ""
+                lines.append(
+                    f"  • [{occurred_str}] {type_label} ¥{amt:.2f} | 分类: {r['category']}{ledger_str}{note_str}"
+                )
+
+            if total_count > len(records):
+                lines.append(f"\n⚠️ 还有 {total_count - len(records)} 条记录未显示。")
+        else:
+            lines.append("\n📝 该时间段内暂无账目记录。")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.error(f"查询账目失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"❌ 查询账目失败: {str(e)}"
 
 
 async def inventory_type(
@@ -99,7 +260,7 @@ async def check_inventory(
     name: str = "",
     location: str = "",
     barcode: str = "",
-    limit: int = 10,
+    limit: int = 50,
 ) -> str:
     """
     查询物品库存信息
@@ -116,6 +277,14 @@ async def check_inventory(
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
+            # 先查总数
+            total_count = await crud.count_inventory(
+                conn,
+                name=name if name else None,
+                location=location if location else None,
+                barcode=barcode if barcode else None,
+            )
+
             items = await crud.list_inventory(
                 conn,
                 limit=limit,
@@ -124,10 +293,12 @@ async def check_inventory(
                 barcode=barcode if barcode else None,
             )
 
+            logger.info(f"check_inventory 调用: name={name!r}, location={location!r}, barcode={barcode!r}, limit={limit} → 返回 {len(items)}/{total_count} 条")
+
             if not items:
                 return "📦 未找到匹配的物品库存记录。"
 
-            result_lines = [f"📦 共找到 {len(items)} 条物品记录：\n"]
+            result_lines = [f"📦 共找到 {total_count} 条物品记录（本次返回 {len(items)} 条）：\n"]
             for item in items:
                 expiry_str = ""
                 if item.get("expiry_date"):
@@ -142,10 +313,43 @@ async def check_inventory(
                     f"类别: {category_str}{expiry_str}"
                 )
 
+            if total_count > len(items):
+                result_lines.append(f"\n⚠️ 还有 {total_count - len(items)} 条记录未显示，请增大 limit 参数查看全部。")
+
             return "\n".join(result_lines)
     except Exception as e:
         logger.error(f"查询物品库存失败: {e}")
         return f"❌ 查询物品库存失败: {str(e)}"
+
+
+async def list_ledgers() -> str:
+    """
+    查询所有账本列表（含统计信息）
+
+    Returns:
+        账本列表的格式化字符串，包含每个账本的名称、图标、记录数、支出和收入
+    """
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            ledgers = await crud.list_ledgers(conn, include_stats=True)
+
+            if not ledgers:
+                return "📔 当前没有任何账本，请先创建账本。"
+
+            lines = [f"📔 共有 {len(ledgers)} 个账本：\n"]
+            for l in ledgers:
+                default_tag = " (默认)" if l["is_default"] else ""
+                expense = abs(float(l["total_expense"]))
+                income = float(l["total_income"])
+                lines.append(
+                    f"  • {l['icon']} {l['name']}{default_tag}\n"
+                    f"    记录数: {l['record_count']} | 总支出: ¥{expense:.2f} | 总收入: ¥{income:.2f}"
+                )
+            return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"查询账本列表失败: {e}")
+        return f"❌ 查询账本列表失败: {str(e)}"
 
 
 # ============================================================
@@ -160,7 +364,7 @@ TOOLS_DEFINITION_OPENAI = [
         "type": "function",
         "function": {
             "name": "add_expense",
-            "description": "添加一条家庭账目记录（支出或收入）。当用户提到消费、花钱、收入、记账等操作时调用此工具。",
+            "description": "添加一条家庭账目记录（支出或收入），可指定账本。当用户提到消费、花钱、收入、记账等操作时调用此工具。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -181,8 +385,60 @@ TOOLS_DEFINITION_OPENAI = [
                         "enum": ["expense", "income"],
                         "description": "类型：expense=支出，income=收入。默认为 expense",
                     },
+                    "ledger_name": {
+                        "type": "string",
+                        "description": "账本名称，如：日常开销、家庭公共、旅行基金、孩子教育、投资理财。不传则记到默认账本。可通过 list_ledgers 工具查看所有账本。",
+                    },
                 },
                 "required": ["amount", "category"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_expense",
+            "description": "查询家庭账目记录和消费统计，可按账本筛选。当用户想查看花了多少钱、收入情况、消费记录、账目明细、某时间段的支出统计、某个账本的情况时调用此工具。例如'这个月花了多少钱'、'日常开销花了多少'、'旅行基金花了多少'、'上个月消费多少'等。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {
+                        "type": "string",
+                        "description": "查询开始日期，格式 YYYY-MM-DD，如 2026-08-01。为空则默认本月1号。",
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "查询结束日期，格式 YYYY-MM-DD，如 2026-08-31。为空则默认今天。",
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "按分类筛选，如：餐饮、交通、购物、工资、娱乐、医疗、教育、住房等。为空则查全部分类。",
+                    },
+                    "expense_type": {
+                        "type": "string",
+                        "enum": ["expense", "income"],
+                        "description": "类型筛选：expense=仅查支出，income=仅查收入。为空则查全部。",
+                    },
+                    "ledger_name": {
+                        "type": "string",
+                        "description": "按账本名称筛选，如：日常开销、家庭公共、旅行基金、孩子教育、投资理财。为空则查全部账本。可通过 list_ledgers 工具查看所有账本。",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "返回明细记录数量上限，默认50。",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_ledgers",
+            "description": "查询所有账本列表（含统计信息）。当用户想知道有哪些账本、每个账本花了多少、各账本的收支情况时调用此工具。例如'我有哪些账本'、'各账本情况'、'旅行基金花了多少'等。",
+            "parameters": {
+                "type": "object",
+                "properties": {},
             },
         },
     },
@@ -233,7 +489,7 @@ TOOLS_DEFINITION_OPENAI = [
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "返回结果数量上限，默认10",
+                        "description": "返回结果数量上限，默认50。查询全部库存时不要传此参数或传50。",
                     },
                 },
             },
@@ -245,6 +501,8 @@ TOOLS_DEFINITION_OPENAI = [
 # 工具名称到函数的映射表
 TOOL_FUNCTIONS = {
     "add_expense": add_expense,
+    "check_expense": check_expense,
+    "list_ledgers": list_ledgers,
     "inventory_type": inventory_type,
     "check_inventory": check_inventory,
 }

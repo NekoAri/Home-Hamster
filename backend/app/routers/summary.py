@@ -16,8 +16,9 @@ router = APIRouter(prefix="/api/summary", tags=["统计概览"])
 async def get_overview(
     start_date: Optional[datetime] = Query(None, description="开始时间（默认本月1号）"),
     end_date: Optional[datetime] = Query(None, description="结束时间（默认当前）"),
+    ledger_id: Optional[int] = Query(None, description="按账本筛选（不传则查全部账本）"),
 ):
-    """获取仪表盘总览数据：总收入、总支出、净额、交易笔数、分类汇总"""
+    """获取仪表盘总览数据：总收入、总支出、净额、交易笔数、分类汇总，可按账本筛选"""
     pool = await get_pool()
     async with pool.acquire() as conn:
         # 默认查询本月数据
@@ -27,33 +28,43 @@ async def get_overview(
         if not end_date:
             end_date = now
 
+        # 构建条件
+        conditions = ["occurred_at BETWEEN $1 AND $2"]
+        params = [start_date, end_date]
+        idx = 3
+        if ledger_id:
+            conditions.append(f"ledger_id = ${idx}")
+            params.append(ledger_id)
+            idx += 1
+        where_clause = " AND ".join(conditions)
+
         # 总支出和总收入
         expense_row = await conn.fetchrow(
-            "SELECT COALESCE(SUM(amount), 0) AS total FROM accounts "
-            "WHERE type = 'expense' AND occurred_at BETWEEN $1 AND $2",
-            start_date, end_date,
+            f"SELECT COALESCE(SUM(amount), 0) AS total FROM accounts "
+            f"WHERE type = 'expense' AND {where_clause}",
+            *params,
         )
         income_row = await conn.fetchrow(
-            "SELECT COALESCE(SUM(amount), 0) AS total FROM accounts "
-            "WHERE type = 'income' AND occurred_at BETWEEN $1 AND $2",
-            start_date, end_date,
+            f"SELECT COALESCE(SUM(amount), 0) AS total FROM accounts "
+            f"WHERE type = 'income' AND {where_clause}",
+            *params,
         )
 
         # 交易笔数
         count_row = await conn.fetchrow(
-            "SELECT COUNT(*) AS cnt FROM accounts WHERE occurred_at BETWEEN $1 AND $2",
-            start_date, end_date,
+            f"SELECT COUNT(*) AS cnt FROM accounts WHERE {where_clause}",
+            *params,
         )
 
         # 按分类汇总支出
         category_rows = await conn.fetch(
-            """
+            f"""
             SELECT category, SUM(ABS(amount)) AS total, COUNT(*) AS count
             FROM accounts
-            WHERE type = 'expense' AND occurred_at BETWEEN $1 AND $2
+            WHERE type = 'expense' AND {where_clause}
             GROUP BY category ORDER BY total DESC LIMIT 10
             """,
-            start_date, end_date,
+            *params,
         )
 
         # 近7天每日支出趋势
@@ -174,6 +185,7 @@ async def get_inventory_stats():
 async def count_accounts(
     category: Optional[str] = Query(None),
     type: Optional[str] = Query(None),
+    ledger_id: Optional[int] = Query(None, description="按账本筛选"),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
 ):
@@ -183,6 +195,10 @@ async def count_accounts(
         query = "SELECT COUNT(*) AS total FROM accounts WHERE 1=1"
         params = []
         idx = 1
+        if ledger_id:
+            query += f" AND ledger_id = ${idx}"
+            params.append(ledger_id)
+            idx += 1
         if category:
             query += f" AND category = ${idx}"
             params.append(category)
