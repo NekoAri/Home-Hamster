@@ -171,30 +171,15 @@ class AgentManager:
 
     def _build_system_prompt(self, agent_config: dict) -> str:
         """
-        根据 Agent 人设构建系统提示词
-        如果用户自定义了 system_prompt 直接使用；否则从 name + personality 生成
+        构建主 Agent 的系统提示词。
+
+        主从架构下，提示词由编排器统一生成：人设 + 子 Agent 花名册 + 分派规则。
+        用户自定义了 system_prompt 时，它会作为「人设」部分被保留，
+        编排规则仍会自动附加（否则主 Agent 就不知道要派活）。
         """
-        if agent_config.get("system_prompt"):
-            return agent_config["system_prompt"]
+        from app.services.orchestrator import build_master_system_prompt
 
-        name = agent_config.get("name", "HomeHamster")
-        personality = agent_config.get("personality", "")
-
-        return f"""你是 {name}，一个智能家庭管理助手。
-
-你的核心能力：
-1. **家庭账目管理**：记录支出和收入，帮助用户追踪家庭财务状况。
-2. **物品仓储管理**：查询家庭物品库存，管理物品分类。
-3. **智能建议**：基于用户的账目和库存数据，提供资金使用建议和物品采购建议。
-
-你的性格特点：{personality or '友好、亲切，像一个精明能干的家庭管家。回答简洁实用，不啰嗦。'}
-
-交流规则：
-- 使用中文交流
-- 涉及金额时使用人民币（¥）符号
-- 当用户需要记账、查询库存等操作时，调用对应的工具函数
-- 如果用户的请求不在你的能力范围内，礼貌地告知用户
-"""
+        return build_master_system_prompt(agent_config)
 
     def _dict_to_llm_config(self, d: dict) -> LLMConfig:
         """将数据库字典转换为 LLMConfig 数据类"""

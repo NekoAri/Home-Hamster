@@ -126,6 +126,10 @@ class LLMProvider(ABC):
         """
         执行工具调用，返回 tool 角色消息列表
         通用逻辑，各供应商共用
+
+        注意：v4 主从架构下，主 Agent 只会产生「委派给子 Agent」的调用，
+        实际执行由 Orchestrator 负责，子 Agent 使用自己的工具集。
+        此方法保留作为通用执行器，供脚本/兼容场景使用。
         """
         results = []
         for tc in tool_calls:

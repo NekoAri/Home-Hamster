@@ -315,20 +315,17 @@ class HistoryService:
                 content = msg["content"]
 
                 if role == "tool":
-                    # 工具结果消息
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": msg.get("tool_call_id", ""),
-                        "content": content,
-                    })
+                    # 工具结果属于执行细节，不回灌给模型：
+                    # 主从架构下这些细节已由子 Agent 汇总进最终回复，
+                    # 回灌反而会和下面的 assistant 消息配不成对，触发 400。
+                    continue
                 elif role == "assistant" and msg.get("tool_calls"):
-                    # 带工具调用的 assistant 消息
-                    tool_calls = msg["tool_calls"] if isinstance(msg["tool_calls"], list) else json.loads(msg["tool_calls"])
-                    messages.append({
-                        "role": "assistant",
-                        "content": content,
-                        "tool_calls": tool_calls,
-                    })
+                    # 历史上的工具调用消息只保留文本结论，去掉 tool_calls 结构。
+                    # 原因：tool 结果没有持久化，带 tool_calls 的 assistant 消息
+                    # 缺少配对的 tool 消息会导致 OpenAI 兼容接口报 400。
+                    if content and content.strip():
+                        messages.append({"role": "assistant", "content": content})
+                    continue
                 else:
                     messages.append({
                         "role": role,

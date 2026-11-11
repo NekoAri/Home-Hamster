@@ -26,3 +26,7 @@ Thumbs.db
 
 # 日志
 *.log
+
+# 工作区 AI 数据与构建产物
+.workbuddy/
+*.tsbuildinfo

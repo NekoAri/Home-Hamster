@@ -12,6 +12,17 @@ interface ChatProps {
   embedded?: boolean
 }
 
+/** 子 Agent 执行轨迹（主从架构：主 Agent 派发任务后的实时状态） */
+interface AgentTraceItem {
+  agent: string
+  label: string
+  task: string
+  state: 'running' | 'done' | 'error'
+  tools: string[]
+  summary?: string
+  elapsed?: number
+}
+
 /**
  * HomeHamster 对话组件（v3 - 服务端历史管理）
  *
@@ -44,16 +55,67 @@ export default function Chat({ embedded = false }: ChatProps) {
     sessionIdRef.current = sessionId
   }, [sessionId])
 
+  // ---- 主从 Agent：子 Agent 执行轨迹 ----
+  const [trace, setTrace] = useState<AgentTraceItem[]>([])
+
+  const applyAgentEvent = (ev: any) => {
+    const agentKey = ev.agent || 'unknown'
+    setTrace((prev) => {
+      const idx = prev.findIndex((item) => item.agent === agentKey)
+      const current = idx >= 0 ? prev[idx] : undefined
+
+      if (ev.event === 'start') {
+        // 同一子 Agent 在新一轮被重新派发时重置
+        if (current && current.state === 'running') return prev
+        const item: AgentTraceItem = {
+          agent: agentKey,
+          label: ev.label || agentKey,
+          task: ev.task || '',
+          state: 'running',
+          tools: [],
+        }
+        if (idx >= 0) {
+          const next = [...prev]
+          next[idx] = item
+          return next
+        }
+        return [...prev, item]
+      }
+
+      if (!current) return prev
+      const next = [...prev]
+      const updated = { ...current }
+
+      if (ev.event === 'tool') {
+        if (ev.tool) updated.tools = [...updated.tools, ev.tool]
+      } else if (ev.event === 'done') {
+        updated.state = 'done'
+        updated.summary = ev.summary
+        updated.elapsed = ev.elapsed
+        if (Array.isArray(ev.tools) && ev.tools.length) updated.tools = ev.tools
+      } else if (ev.event === 'error') {
+        updated.state = 'error'
+        updated.summary = ev.summary || '执行失败'
+      }
+
+      next[idx] = updated
+      return next
+    })
+  }
+
   // ---- useChat 必须在回调定义之前调用，以获取 setMessages ----
   const { messages, setMessages, input, handleInputChange, handleSubmit, isLoading, error, reload } = useChat({
     api: '/api/agent/chat',
 
     // v3 核心：自定义 fetch 只发送 session_id + content，不再传全量 messages
-    fetch: async (endpoint: string, options: RequestInit) => {
-      const body = JSON.parse(options.body as string)
+    fetch: async (endpoint: RequestInfo | URL, options?: RequestInit) => {
+      const body = JSON.parse((options?.body as string) || '{}')
       // 提取最新的用户消息（useChat 会把所有消息都放进来，我们只取最后一条 user 消息）
       const userMessages = body.messages.filter((msg: any) => msg.role === 'user')
       const lastMessage = userMessages[userMessages.length - 1]
+
+      // 新一轮对话，清空上一轮的子 Agent 执行轨迹
+      setTrace([])
 
       // 发送到后端：只需要 session_id + content
       const response = await fetch(endpoint, {
@@ -98,6 +160,11 @@ export default function Chat({ embedded = false }: ChatProps) {
 
                 try {
                   const parsed = JSON.parse(data)
+                  // 主从架构：子 Agent 执行状态事件（不进入消息正文，单独渲染轨迹）
+                  if (parsed.type === 'agent_event') {
+                    applyAgentEvent(parsed)
+                    continue
+                  }
                   if (parsed.content) {
                     const token = JSON.stringify(parsed.content)
                     controller.enqueue(encoder.encode(`0:${token}\n`))
@@ -157,6 +224,7 @@ export default function Chat({ embedded = false }: ChatProps) {
       const session = await createSession({ user_id: 'default' })
       setSessionId(session.session_id)
       setMessages([])
+      setTrace([])
       await loadSessions()
     } catch (e) {
       console.error('创建会话失败:', e)
@@ -180,6 +248,7 @@ export default function Chat({ embedded = false }: ChatProps) {
           content: m.content,
         }))
       setMessages(chatMessages)
+      setTrace([])
       setShowSidebar(false)
     } catch (e) {
       console.error('加载会话消息失败:', e)
@@ -239,7 +308,7 @@ export default function Chat({ embedded = false }: ChatProps) {
   // 自动滚动到消息底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, isLoading])
+  }, [messages, isLoading, trace])
 
   // 输入框自适应高度
   useEffect(() => {
@@ -302,7 +371,7 @@ export default function Chat({ embedded = false }: ChatProps) {
               />
               <div>
                 <h1 className="text-lg font-bold text-gray-800">{agentInfo.name}</h1>
-                <p className="text-xs text-gray-500">家庭管理 Agent</p>
+                <p className="text-xs text-gray-500">主 Agent · 记账 / 库存 分工协作</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -457,6 +526,57 @@ export default function Chat({ embedded = false }: ChatProps) {
                 </div>
               </div>
             ))}
+
+            {/* ===== 子 Agent 执行轨迹（主从协作） ===== */}
+            {trace.length > 0 && (
+              <div className="flex justify-start message-fade-in">
+                <div className="w-full max-w-[85%] rounded-2xl border border-orange-100 bg-orange-50/70 px-4 py-3">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-orange-600 mb-2">
+                    <span>🐹 分工执行</span>
+                    {trace.some((item) => item.state === 'running') && (
+                      <span className="inline-block w-1.5 h-1.5 bg-orange-400 rounded-full animate-pulse" />
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {trace.map((item) => (
+                      <div key={item.agent} className="flex items-start gap-2">
+                        <span className="flex-shrink-0 text-xs leading-5">
+                          {item.state === 'running' ? '⏳' : item.state === 'error' ? '⚠️' : '✅'}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-xs font-medium text-gray-700">{item.label}</span>
+                            {item.tools.map((tool, i) => (
+                              <span
+                                key={`${tool}-${i}`}
+                                className="px-1.5 py-0.5 rounded bg-white border border-orange-200 text-[10px] text-orange-600 font-mono"
+                              >
+                                {tool}
+                              </span>
+                            ))}
+                            {item.elapsed !== undefined && item.state !== 'running' && (
+                              <span className="text-[10px] text-gray-400">{item.elapsed}s</span>
+                            )}
+                          </div>
+                          {item.task && (
+                            <p className="text-[11px] text-gray-500 mt-0.5 break-words">{item.task}</p>
+                          )}
+                          {item.summary && (
+                            <p
+                              className={`text-[11px] mt-0.5 break-words ${
+                                item.state === 'error' ? 'text-red-500' : 'text-gray-600'
+                              }`}
+                            >
+                              {item.summary}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* 加载中的打字指示器 */}
             {isLoading && messages[messages.length - 1]?.role === 'user' && (

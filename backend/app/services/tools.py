@@ -477,6 +477,54 @@ async def add_inventory(
         return f"❌ 操作失败: {str(e)}"
 
 
+async def consume_inventory(
+    name: str,
+    quantity: float,
+    unit: str = "",
+    note: str = "",
+) -> str:
+    """
+    领用/消耗物品库存（数量减少，不涉及记账）。当用户使用、吃掉、用掉、送人、丢弃物品时调用。
+
+    Args:
+        name: 物品名称（精确匹配，可先用 check_inventory 确认）
+        quantity: 消耗数量（正数）
+        unit: 单位（留空则沿用库存中记录的单位）
+        note: 备注
+
+    Returns:
+        操作结果描述（含剩余数量）
+    """
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            existing = await crud.get_inventory_by_name(conn, name)
+            if not existing:
+                return f"❌ 库存中没有找到「{name}」，请先用 check_inventory 确认物品名称。"
+
+            old_qty = float(existing["quantity"])
+            new_qty = old_qty - abs(quantity)
+            if new_qty < 0:
+                new_qty = 0.0
+
+            await crud.update_inventory(conn, existing["id"], quantity=new_qty)
+            logger.info(f"consume_inventory: {name} {old_qty} → {new_qty} | {note}")
+
+            used_unit = unit or existing["unit"]
+            msg = (
+                f"✅ 已领用：{name} {abs(quantity)}{used_unit}"
+                f"（剩余 {new_qty:g}{existing['unit']}）"
+            )
+            if old_qty < abs(quantity):
+                msg += "\n⚠️ 领用数量超过库存，已按实际清零处理。"
+            if new_qty == 0:
+                msg += "\n📢 该物品库存已用完，建议补充采购。"
+            return msg
+    except Exception as e:
+        logger.error(f"consume_inventory 失败: {e}")
+        return f"❌ 领用库存失败: {str(e)}"
+
+
 # ============================================================
 # OpenAI Function Calling 工具定义
 # 将上面的函数定义为 OpenAI tools 格式，供 Agent 使用
@@ -676,6 +724,35 @@ TOOLS_DEFINITION_OPENAI = [
     {
         "type": "function",
         "function": {
+            "name": "consume_inventory",
+            "description": "领用/消耗物品库存（数量减少、不涉及记账）。当用户说用掉、吃掉、喝掉、用完、送人、丢弃某物品时调用，如'用掉2包纸巾'、'喝了一瓶牛奶'。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "物品名称，如：牛奶、抽纸",
+                    },
+                    "quantity": {
+                        "type": "number",
+                        "description": "消耗数量（正数）",
+                    },
+                    "unit": {
+                        "type": "string",
+                        "description": "单位，留空则沿用库存中记录的单位",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "备注信息",
+                    },
+                },
+                "required": ["name", "quantity"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "inventory_type",
             "description": "新增物品类别。当用户需要添加新的物品分类时调用此工具。",
             "parameters": {
@@ -709,8 +786,44 @@ TOOL_FUNCTIONS = {
     "list_ledgers": list_ledgers,
     "check_inventory": check_inventory,
     "add_inventory": add_inventory,
+    "consume_inventory": consume_inventory,
     "inventory_type": inventory_type,
 }
+
+
+# ============================================================
+# 按子 Agent 归属分组的工具集（主从架构）
+# ============================================================
+#
+# 主 Agent 不再直接持有数据库工具，而是把任务分派给子 Agent；
+# 子 Agent 只能看到自己职责范围内的工具，避免跨域越权操作。
+#
+# 说明：add_purchase（购物=记账+入库）在拆分后不再归属任何单个子 Agent，
+# 由主 Agent 把"记支出"和"入库"分别派给两个子 Agent 协作完成。
+# 函数本身保留，供脚本/兼容调用。
+
+BOOKKEEPING_TOOL_NAMES = ("add_expense", "check_expense", "list_ledgers")
+INVENTORY_TOOL_NAMES = (
+    "add_inventory",
+    "consume_inventory",
+    "check_inventory",
+    "inventory_type",
+)
+
+
+def _select_tool_definitions(names: tuple[str, ...]) -> list[dict]:
+    """按名称从全量工具定义中筛选出子集"""
+    wanted = set(names)
+    return [t for t in TOOLS_DEFINITION_OPENAI if t["function"]["name"] in wanted]
+
+
+# 记账子 Agent 的工具集
+BOOKKEEPING_TOOLS = _select_tool_definitions(BOOKKEEPING_TOOL_NAMES)
+BOOKKEEPING_FUNCTIONS = {n: TOOL_FUNCTIONS[n] for n in BOOKKEEPING_TOOL_NAMES}
+
+# 库存子 Agent 的工具集
+INVENTORY_TOOLS = _select_tool_definitions(INVENTORY_TOOL_NAMES)
+INVENTORY_FUNCTIONS = {n: TOOL_FUNCTIONS[n] for n in INVENTORY_TOOL_NAMES}
 
 # 向后兼容别名
 TOOLS_DEFINITION = TOOLS_DEFINITION_OPENAI
