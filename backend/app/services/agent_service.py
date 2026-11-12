@@ -131,6 +131,7 @@ async def chat_stream(
 
     system_prompt = manager.get_system_prompt()
     tools = orchestrator.get_tools()
+    sub_providers = manager.get_sub_providers()  # 每个子 Agent 可绑定独立模型
 
     # ---- 第 1 步：保存用户消息到数据库 ----
     await HistoryService.save_message(
@@ -197,7 +198,7 @@ async def chat_stream(
         yield HEARTBEAT
         queue: asyncio.Queue = asyncio.Queue()
         dispatch_task = asyncio.create_task(
-            orchestrator.execute(tool_calls, provider, queue.put_nowait)
+            orchestrator.execute(tool_calls, provider, queue.put_nowait, sub_providers)
         )
 
         while True:

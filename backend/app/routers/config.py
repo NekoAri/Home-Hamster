@@ -209,3 +209,95 @@ async def activate_agent(config_id: int):
             raise HTTPException(status_code=404, detail="Agent 配置不存在")
     await _reload_agent()
     return {"message": "已激活", "config": result}
+
+
+# ============================================================
+# Agent 模型绑定（主从架构：每个 Agent 可使用不同模型）
+# ============================================================
+
+@router.get("/agent-models", summary="查询各 Agent 的模型绑定与生效模型")
+async def get_agent_model_bindings():
+    """
+    返回主 Agent 与所有子 Agent 的模型绑定情况：
+    - llm_config_id：显式绑定的配置 ID（null = 跟随主 Agent / 默认激活模型）
+    - effective_model：当前实际生效的模型名
+    """
+    from app.services.agents.registry import list_agents
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        llm_configs = await crud.list_llm_configs(conn)
+        bindings = await crud.list_agent_model_bindings(conn)
+        active_agent = await crud.get_active_agent_config(conn)
+
+    llm_by_id = {c["id"]: c for c in llm_configs}
+    active_llm = next((c for c in llm_configs if c.get("is_active")), None)
+
+    # 主 Agent 生效模型：agent 人设指定 > 绑定表 > 默认激活配置
+    master_effective = None
+    if active_agent and active_agent.get("llm_config_id"):
+        master_effective = llm_by_id.get(active_agent["llm_config_id"])
+    master_binding_id = bindings.get("master")
+    if master_binding_id and master_binding_id in llm_by_id:
+        master_effective = llm_by_id[master_binding_id]
+    if master_effective is None:
+        master_effective = active_llm
+
+    agents: list[dict] = [{
+        "agent_key": "master",
+        "label": "🎯 主 Agent（编排者）",
+        "is_master": True,
+        "llm_config_id": master_binding_id,
+        "effective_model": master_effective["model_name"] if master_effective else None,
+        "effective_config_name": master_effective["name"] if master_effective else None,
+    }]
+
+    for agent in list_agents():
+        binding_id = bindings.get(agent.key)
+        bound = llm_by_id.get(binding_id) if binding_id else None
+        effective = bound or master_effective
+        agents.append({
+            "agent_key": agent.key,
+            "label": agent.label,
+            "is_master": False,
+            "llm_config_id": binding_id,
+            "effective_model": effective["model_name"] if effective else None,
+            "effective_config_name": effective["name"] if effective else None,
+        })
+
+    return {"agents": agents, "llm_configs": llm_configs}
+
+
+@router.put("/agent-models/{agent_key}", summary="设置某个 Agent 的模型绑定")
+async def set_agent_model_binding(agent_key: str, body: dict):
+    """
+    为指定 Agent 绑定 LLM 配置。
+
+    Body: {"llm_config_id": 2} 绑定指定配置；{"llm_config_id": null} 清除绑定（回退主模型）。
+    """
+    from app.services.agents.registry import list_agents
+
+    valid_keys = {"master"} | {a.key for a in list_agents()}
+    if agent_key not in valid_keys:
+        raise HTTPException(
+            status_code=404,
+            detail=f"未知的 Agent: {agent_key}，可用: {sorted(valid_keys)}",
+        )
+
+    llm_config_id = body.get("llm_config_id")
+    if llm_config_id is not None:
+        if not isinstance(llm_config_id, int):
+            raise HTTPException(status_code=400, detail="llm_config_id 必须为整数或 null")
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            config = await crud.get_llm_config(conn, llm_config_id)
+            if not config:
+                raise HTTPException(status_code=404, detail="LLM 配置不存在")
+            await crud.set_agent_model_binding(conn, agent_key, llm_config_id)
+    else:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await crud.set_agent_model_binding(conn, agent_key, None)
+
+    await _reload_agent()
+    return {"message": "已保存", "agent_key": agent_key, "llm_config_id": llm_config_id}

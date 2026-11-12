@@ -6,15 +6,18 @@ import {
   deleteLLMConfig, activateLLMConfig,
   listAgentConfigs, createAgentConfig, updateAgentConfig,
   deleteAgentConfig, activateAgentConfig, getActiveAgent,
+  getAgentModelBindings, setAgentModelBinding,
   type ProviderPreset, type LLMConfig, type AgentConfig,
+  type AgentModelBinding,
 } from '@/lib/api'
 
 /**
  * HomeHamster 设置弹窗组件
  *
- * 两个功能 Tab：
+ * 三个功能 Tab：
  * 1. 模型配置 — 管理多供应商 LLM 配置（OpenAI / Claude / DeepSeek / Ollama 等）
  * 2. Agent人设 — 配置 Agent 名字、头像、性格、系统提示词
+ * 3. Agent模型 — 为主 Agent 与各子 Agent 分别指定使用的模型
  */
 
 interface SettingsProps {
@@ -26,7 +29,7 @@ interface SettingsProps {
 const AVATAR_OPTIONS = ['🐹', '🐱', '🐶', '🦊', '🐼', '🐨', '🤖', '👨‍💼', '👩‍💼', '🧙', '🐱‍👤', '🦉']
 
 export default function Settings({ onClose, onAgentChange }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<'llm' | 'agent'>('llm')
+  const [activeTab, setActiveTab] = useState<'llm' | 'agent' | 'models'>('llm')
   const [providers, setProviders] = useState<Record<string, ProviderPreset>>({})
   const [llmConfigs, setLLMConfigs] = useState<LLMConfig[]>([])
   const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([])
@@ -95,6 +98,16 @@ export default function Settings({ onClose, onAgentChange }: SettingsProps) {
           >
             🐹 Agent 人设
           </button>
+          <button
+            onClick={() => setActiveTab('models')}
+            className={`flex-1 py-3 text-sm font-medium transition-colors ${
+              activeTab === 'models'
+                ? 'text-orange-500 border-b-2 border-orange-500 bg-orange-50/50'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            🧩 Agent 模型
+          </button>
         </div>
 
         {/* 内容区 */}
@@ -109,13 +122,15 @@ export default function Settings({ onClose, onAgentChange }: SettingsProps) {
               configs={llmConfigs}
               onRefresh={loadData}
             />
-          ) : (
+          ) : activeTab === 'agent' ? (
             <AgentConfigTab
               configs={agentConfigs}
               llmConfigs={llmConfigs}
               onRefresh={loadData}
               onAgentChange={onAgentChange}
             />
+          ) : (
+            <AgentModelTab />
           )}
         </div>
       </div>
@@ -743,6 +758,114 @@ function AgentConfigTab({ configs, llmConfigs, onRefresh, onAgentChange }: Agent
           ))
         )}
       </div>
+    </div>
+  )
+}
+
+// ============================================================
+// Agent 模型绑定 Tab（主从架构：每个 Agent 可用不同模型）
+// ============================================================
+
+function AgentModelTab() {
+  const [agents, setAgents] = useState<AgentModelBinding[]>([])
+  const [llmConfigs, setLLMConfigs] = useState<LLMConfig[]>([])
+  const [loading, setLoading] = useState(true)
+  const [savingKey, setSavingKey] = useState<string | null>(null)
+  const [error, setError] = useState('')
+
+  const loadBindings = useCallback(async () => {
+    try {
+      const data = await getAgentModelBindings()
+      setAgents(data.agents)
+      setLLMConfigs(data.llm_configs)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadBindings()
+  }, [loadBindings])
+
+  const handleChange = async (agent: AgentModelBinding, value: string) => {
+    const llmConfigId = value ? Number(value) : null
+    setSavingKey(agent.agent_key)
+    setError('')
+    try {
+      await setAgentModelBinding(agent.agent_key, llmConfigId)
+      await loadBindings()
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setSavingKey(null)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="w-8 h-8 border-2 border-orange-300 border-t-orange-500 rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-6 space-y-4">
+      <p className="text-sm text-gray-500">
+        为主 Agent 与各子 Agent 分别指定模型。子 Agent 未绑定时自动跟随主 Agent 的模型，
+        修改后立即生效（例如：主 Agent 用强模型做编排，子 Agent 用轻量模型省钱提效）。
+      </p>
+
+      {error && (
+        <div className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{error}</div>
+      )}
+
+      <div className="space-y-3">
+        {agents.map((agent) => (
+          <div
+            key={agent.agent_key}
+            className="flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white"
+          >
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-gray-800">{agent.label}</p>
+              <p className="text-xs text-gray-500 mt-0.5 truncate">
+                当前生效：
+                {agent.effective_config_name
+                  ? `${agent.effective_config_name} (${agent.effective_model})`
+                  : '⚠️ 未配置任何模型'}
+                {!agent.is_master && !agent.llm_config_id && ' · 跟随主 Agent'}
+              </p>
+            </div>
+            <select
+              value={agent.llm_config_id ?? ''}
+              disabled={savingKey === agent.agent_key || llmConfigs.length === 0}
+              onChange={(e) => handleChange(agent, e.target.value)}
+              className="w-56 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-300 focus:outline-none bg-white disabled:opacity-60"
+            >
+              <option value="">
+                {agent.is_master ? '使用默认激活模型' : '跟随主 Agent'}
+              </option>
+              {llmConfigs.map((llm) => (
+                <option key={llm.id} value={llm.id}>
+                  {llm.name} ({llm.model_name})
+                  {llm.is_active ? ' [已激活]' : ''}
+                </option>
+              ))}
+            </select>
+            {savingKey === agent.agent_key && (
+              <div className="w-4 h-4 border-2 border-orange-300 border-t-orange-500 rounded-full animate-spin" />
+            )}
+          </div>
+        ))}
+      </div>
+
+      {llmConfigs.length === 0 && (
+        <div className="text-sm text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
+          还没有可用的模型配置，请先在「模型配置」中添加并激活一个模型。
+        </div>
+      )}
     </div>
   )
 }

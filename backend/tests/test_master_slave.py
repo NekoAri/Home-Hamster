@@ -81,9 +81,11 @@ class FakeDelegate:
         self.delay = delay
         self.delegate_tool_name = f"delegate_to_{key}"
         self.tasks: list[str] = []
+        self.providers: list = []
 
     async def run(self, task, provider, context="", on_event=None):
         self.tasks.append(task)
+        self.providers.append(provider)
         if on_event:
             on_event({
                 "type": "agent_event", "event": "start",
@@ -273,6 +275,9 @@ async def test_chat_stream_end_to_end() -> None:
         def get_system_prompt(self):
             return "你是主 Agent"
 
+        def get_sub_providers(self):
+            return {}  # 测试环境无独立模型绑定，全部回退主模型
+
     saved: list[dict] = []
 
     async def fake_save_message(session_id, role, content, tool_calls=None):
@@ -284,7 +289,7 @@ async def test_chat_stream_end_to_end() -> None:
     async def noop_summary(session_id, provider):
         return None
 
-    async def fake_execute(tool_calls, provider, on_event=None):
+    async def fake_execute(tool_calls, provider, on_event=None, sub_providers=None):
         if on_event:
             on_event({"type": "agent_event", "event": "start",
                       "agent": "bookkeeping", "label": "📒 记账专家",
@@ -365,6 +370,37 @@ def test_prompt_and_tool_scope() -> None:
     print("✅ 6. 提示词花名册 + 工具作用域隔离正常")
 
 
+async def test_per_agent_provider_dispatch() -> None:
+    """每个子 Agent 应拿到自己绑定的 provider，未绑定的回退主 Agent 的 provider"""
+    bookkeeping = FakeDelegate("bookkeeping", "📒 记账专家")
+    inventory = FakeDelegate("inventory", "📦 库存专家")
+    table = {a.delegate_tool_name: a for a in (bookkeeping, inventory)}
+
+    master_provider = FakeProvider([])
+    sub_providers = {"bookkeeping": FakeProvider([])}  # 只有记账绑定了独立模型
+
+    original = orch_module.resolve_delegate_tool
+    orch_module.resolve_delegate_tool = lambda name: table.get(name)  # type: ignore[assignment]
+    try:
+        tool_calls = [
+            ToolCallResult(id="p1", name="delegate_to_bookkeeping",
+                           arguments={"task": "记录支出 60 元"}),
+            ToolCallResult(id="p2", name="delegate_to_inventory",
+                           arguments={"task": "牛奶入库 1 箱"}),
+        ]
+        await Orchestrator().execute(
+            tool_calls, provider=master_provider,
+            sub_providers=sub_providers,
+        )
+    finally:
+        orch_module.resolve_delegate_tool = original  # type: ignore[assignment]
+
+    # 记账拿到自己绑定的 provider，库存回退主 Agent 的 provider
+    assert bookkeeping.providers == [sub_providers["bookkeeping"]]
+    assert inventory.providers == [master_provider]
+    print("✅ 7. 多模型分发：绑定子 Agent 用独立 provider，未绑定回退主模型")
+
+
 async def main() -> None:
     await test_subagent_loop()
     await test_subagent_unknown_tool()
@@ -372,6 +408,7 @@ async def main() -> None:
     await test_orchestrator_parallel()
     await test_orchestrator_unknown_tool_and_empty_task()
     test_prompt_and_tool_scope()
+    await test_per_agent_provider_dispatch()
     await test_chat_stream_end_to_end()
     print("\n🎉 全部通过")
 

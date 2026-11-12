@@ -330,3 +330,19 @@ VALUES (
     TRUE
 )
 ON CONFLICT DO NOTHING;
+
+-- ============================================================
+-- 5.7 Agent 模型绑定表（agent_model_bindings）
+--    主从架构下，为主 Agent 与各子 Agent 分别指定使用的 LLM 配置。
+--    agent_key: master(主 Agent) / 子 Agent 注册表中的 key（如 bookkeeping、inventory）
+--    未出现在此表中的子 Agent 回退使用主 Agent 的模型配置。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS agent_model_bindings (
+    agent_key     VARCHAR(50) PRIMARY KEY,        -- Agent 标识: master / bookkeeping / inventory ...
+    llm_config_id BIGINT      NOT NULL,           -- 关联的 LLM 配置
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_agent_model_bindings_llm
+        FOREIGN KEY (llm_config_id) REFERENCES llm_configs(id)
+        ON DELETE CASCADE
+);

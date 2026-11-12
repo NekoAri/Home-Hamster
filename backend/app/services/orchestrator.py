@@ -119,20 +119,24 @@ class Orchestrator:
         tool_calls: list,
         provider,
         on_event: Optional[EventSink] = None,
+        sub_providers: Optional[dict] = None,
     ) -> list[dict]:
         """
         执行主 Agent 的委派调用。
 
         Args:
             tool_calls: 主 Agent 产生的 ToolCallResult 列表
-            provider: LLM provider（子 Agent 共用同一模型配置）
+            provider: 主 Agent 的 LLM provider（子 Agent 未单独绑定模型时的回退）
             on_event: 事件回调（start / tool / done / error）
+            sub_providers: 子 Agent key -> provider 映射（每个子 Agent 可用不同模型）
 
         Returns:
             tool 角色消息列表，顺序与传入的 tool_calls 一致
         """
         if not tool_calls:
             return []
+
+        sub_providers = sub_providers or {}
 
         brief = [
             "{}({})".format(tc.name, str((tc.arguments or {}).get("task", ""))[:24])
@@ -141,7 +145,7 @@ class Orchestrator:
         logger.info(f"🧭 主 Agent 派发 {len(tool_calls)} 个子任务: {brief}")
 
         results = await asyncio.gather(
-            *(self._run_one(tc, provider, on_event) for tc in tool_calls)
+            *(self._run_one(tc, provider, on_event, sub_providers) for tc in tool_calls)
         )
         return results
 
@@ -150,6 +154,7 @@ class Orchestrator:
         tool_call,
         provider,
         on_event: Optional[EventSink],
+        sub_providers: Optional[dict] = None,
     ) -> dict:
         """执行单个委派调用，返回 tool 消息"""
         agent = resolve_delegate_tool(tool_call.name)
@@ -176,8 +181,11 @@ class Orchestrator:
                 "content": f"❌ 分派给{agent.label}的任务描述为空，请补充具体任务后重试。",
             }
 
+        # 子 Agent 独立绑定的模型优先，未绑定则共用主 Agent 的模型
+        agent_provider = (sub_providers or {}).get(agent.key, provider)
+
         logger.info(f"➡️ 派发给 {agent.label}: {task[:80]}")
-        result = await agent.run(task, provider, context=context, on_event=on_event)
+        result = await agent.run(task, agent_provider, context=context, on_event=on_event)
 
         return {
             "role": "tool",

@@ -866,3 +866,60 @@ async def activate_agent_config(conn: asyncpg.Connection, config_id: int) -> Opt
         config_id,
     )
     return dict(row) if row else None
+
+
+# ============================================================
+# Agent 模型绑定（主从架构：主 Agent 与各子 Agent 可使用不同模型）
+# ============================================================
+
+async def list_agent_model_bindings(conn: asyncpg.Connection) -> dict[str, int]:
+    """
+    读取所有 Agent 模型绑定。
+
+    Returns:
+        {agent_key: llm_config_id}，如 {"master": 1, "bookkeeping": 2}
+    """
+    rows = await conn.fetch("SELECT agent_key, llm_config_id FROM agent_model_bindings")
+    return {row["agent_key"]: row["llm_config_id"] for row in rows}
+
+
+async def set_agent_model_binding(
+    conn: asyncpg.Connection,
+    agent_key: str,
+    llm_config_id: Optional[int],
+) -> None:
+    """
+    设置/清除某个 Agent 的模型绑定。
+
+    - llm_config_id 不为空：upsert 绑定
+    - llm_config_id 为空：删除绑定（回退到主 Agent 的模型）
+    """
+    if llm_config_id is None:
+        await conn.execute("DELETE FROM agent_model_bindings WHERE agent_key = $1", agent_key)
+        return
+
+    await conn.execute(
+        """
+        INSERT INTO agent_model_bindings (agent_key, llm_config_id)
+        VALUES ($1, $2)
+        ON CONFLICT (agent_key) DO UPDATE
+        SET llm_config_id = EXCLUDED.llm_config_id, updated_at = NOW()
+        """,
+        agent_key, llm_config_id,
+    )
+
+
+async def ensure_agent_model_bindings_table(conn: asyncpg.Connection) -> None:
+    """确保绑定表存在（对已有部署自动补建，无需手工跑迁移 SQL）"""
+    await conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_model_bindings (
+            agent_key     VARCHAR(50) PRIMARY KEY,
+            llm_config_id BIGINT      NOT NULL,
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT fk_agent_model_bindings_llm
+                FOREIGN KEY (llm_config_id) REFERENCES llm_configs(id)
+                ON DELETE CASCADE
+        )
+        """
+    )

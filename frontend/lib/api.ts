@@ -272,6 +272,38 @@ export async function activateAgentConfig(id: number): Promise<{ message: string
 }
 
 // ============================================================
+// Agent 模型绑定 API（每个 Agent 可使用不同模型）
+// ============================================================
+
+export interface AgentModelBinding {
+  agent_key: string
+  label: string
+  is_master: boolean
+  llm_config_id: number | null
+  effective_model: string | null
+  effective_config_name: string | null
+}
+
+export interface AgentModelBindingsResponse {
+  agents: AgentModelBinding[]
+  llm_configs: LLMConfig[]
+}
+
+export async function getAgentModelBindings(): Promise<AgentModelBindingsResponse> {
+  return apiFetch('/api/configs/agent-models')
+}
+
+export async function setAgentModelBinding(
+  agentKey: string,
+  llmConfigId: number | null
+): Promise<{ message: string }> {
+  return apiFetch(`/api/configs/agent-models/${agentKey}`, {
+    method: 'PUT',
+    body: JSON.stringify({ llm_config_id: llmConfigId }),
+  })
+}
+
+// ============================================================
 // 账本 CRUD API
 // ============================================================
 

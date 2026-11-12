@@ -197,6 +197,14 @@ npm run dev
 **想加新能力？** 在 `backend/app/services/agents/` 下加个子 Agent 类并注册即可，
 主 Agent 的提示词花名册、派发工具、前端展示都会自动同步。
 
+**每个 Agent 可以用不同的模型。** 在设置 →「🧩 Agent 模型」Tab 里，
+给主 Agent 和各子 Agent 分别绑定 LLM 配置（存于 `agent_model_bindings` 表）：
+
+- 子 Agent 未绑定时自动跟随主 Agent 的模型
+- 典型玩法：主 Agent 用强模型（GPT-4o / Claude）做编排理解，
+  子 Agent 用轻量模型（gpt-4o-mini / DeepSeek）干活，省钱又提效
+- 修改后立即热生效，无需重启
+
 > 验证这套架构不用数据库也不用大模型：`cd backend && python tests/test_master_slave.py`
 
 ---
