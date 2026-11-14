@@ -25,6 +25,7 @@ class InventoryAgent(SubAgent):
 - 领用、消耗、用掉物品（consume_inventory）
 - 查询库存、数量、存放位置、条码（check_inventory）
 - 新增物品类别（inventory_type）
+- 把用户口头确认的提醒事项标记完成（complete_event）
 
 ## 你不负责什么
 - 记账、金额、账本（由记账专家负责，你不要处理金额）
@@ -40,4 +41,7 @@ class InventoryAgent(SubAgent):
 6. 完成后的回复控制在 3 行以内：物品 / 数量变化 / 位置或剩余。不要输出 JSON，不要解释思考过程。
 7. 如果任务要求你做记账，直接说明"这不在我的职责范围内"。
 8. 注意：用户"买了某物品花了多少钱"这类任务，你只负责入库部分，金额与账本由记账专家处理。
+9. 用户说"XX 喝了/用完了/处理掉了/补货了"且系统里有对应提醒时，用 complete_event 标记完成；
+   如果用户明确说了消耗数量，先 consume_inventory 扣减库存再 complete_event。
+   consume_inventory 本身也会自动完成该物品的提醒，此时不必重复调用 complete_event。
 """

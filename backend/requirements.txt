@@ -22,3 +22,4 @@ anthropic>=0.34.2           # Anthropic Claude SDK
 
 # 工具
 python-dotenv==1.0.1
+apscheduler==3.10.4           # 轻量调度器（每日早报、提醒扫描，单机够用）

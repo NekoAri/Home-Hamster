@@ -4,9 +4,11 @@ import { useState, useEffect, useCallback } from 'react'
 import AccountView from './AccountView'
 import InventoryView from './InventoryView'
 import CategoryView from './CategoryView'
+import ReportsView from './ReportsView'
+import MemoriesView from './MemoriesView'
 import { getOverview, getInventoryStats, type OverviewData, type InventoryStats } from '@/lib/api'
 
-type Tab = 'overview' | 'accounts' | 'inventory' | 'categories'
+type Tab = 'overview' | 'reports' | 'accounts' | 'inventory' | 'categories' | 'memories'
 
 /**
  * Dashboard 普通模式容器
@@ -48,9 +50,11 @@ export default function Dashboard() {
   // Tab 配置
   const tabs: { key: Tab; label: string; img: string }[] = [
     { key: 'overview', label: '概览', img: '/hamsters/think.png' },
+    { key: 'reports', label: '今日简报', img: '/hamsters/logo.png' },
     { key: 'accounts', label: '账目管理', img: '/hamsters/money.png' },
     { key: 'inventory', label: '物品管理', img: '/hamsters/inventory.png' },
     { key: 'categories', label: '类别管理', img: '/hamsters/logo.png' },
+    { key: 'memories', label: '记忆', img: '/hamsters/logo.png' },
   ]
 
   return (
@@ -84,9 +88,11 @@ export default function Dashboard() {
               onRefresh={loadOverview}
             />
           )}
+          {activeTab === 'reports' && <ReportsView />}
           {activeTab === 'accounts' && <AccountView />}
           {activeTab === 'inventory' && <InventoryView />}
           {activeTab === 'categories' && <CategoryView />}
+          {activeTab === 'memories' && <MemoriesView />}
         </div>
       </div>
     </div>

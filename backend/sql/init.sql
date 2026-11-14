@@ -132,7 +132,7 @@ CREATE TABLE IF NOT EXISTS agent_memories (
     user_id         VARCHAR(100)  NOT NULL DEFAULT 'default', -- 用户标识
     memory_type     VARCHAR(30)   NOT NULL,                  -- 记忆类型: preference(偏好) / conversation(对话) / fact(事实)
     content         TEXT          NOT NULL,                  -- 记忆文本内容
-    embedding       vector(1536),                            -- 向量嵌入（OpenAI text-embedding-3-small 维度为 1536）
+    embedding       vector(768),                             -- 向量嵌入（本地 nomic-embed-text-v1.5 维度为 768；老库由 ensure 自动迁移）
     metadata        JSONB         NOT NULL DEFAULT '{}',     -- 附加元数据
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
@@ -345,4 +345,109 @@ CREATE TABLE IF NOT EXISTS agent_model_bindings (
     CONSTRAINT fk_agent_model_bindings_llm
         FOREIGN KEY (llm_config_id) REFERENCES llm_configs(id)
         ON DELETE CASCADE
+);
+
+-- ============================================================
+-- 7. 事件表（events）
+--     通用事件模型：临期/低库存/账单/维护/待办 统一落在这里，
+--     支撑每日早报、提醒闭环与后续的日程待办功能。
+--     不为任何单一功能写死字段，扩展信息放 payload。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS events (
+    id          BIGSERIAL PRIMARY KEY,
+    kind        VARCHAR(30)   NOT NULL,              -- 事件类型: expiry / low_stock / bill / maintenance / todo
+    title       VARCHAR(200)  NOT NULL,              -- 事件标题（通知中直接展示）
+    detail      TEXT,                                -- 详细描述（可选）
+    due_at      TIMESTAMPTZ,                         -- 到期时间（何时该做）
+    remind_at   TIMESTAMPTZ,                         -- 提醒时间（何时该说）
+    repeat_rule VARCHAR(100),                        -- 重复规则（RRULE 片段或简单关键词，如 daily/weekly）
+    status      VARCHAR(20)   NOT NULL DEFAULT 'pending', -- 状态: pending / done / snoozed / dismissed
+    ref_type    VARCHAR(50),                         -- 关联对象类型（如 inventory / account / chat_session）
+    ref_id      BIGINT,                              -- 关联对象 ID
+    owner_id    VARCHAR(100)  NOT NULL DEFAULT 'default', -- 家庭成员标识
+    payload     JSONB         NOT NULL DEFAULT '{}', -- 附加信息（如物品数量、账单金额快照）
+    created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+-- 提醒时间索引（调度器扫描"该提醒了"的事件）
+CREATE INDEX IF NOT EXISTS idx_events_remind_at
+    ON events (remind_at);
+
+-- 状态 + 提醒时间联合索引（调度器主查询：pending 且到点）
+CREATE INDEX IF NOT EXISTS idx_events_status_remind_at
+    ON events (status, remind_at);
+
+-- 关联对象索引（从对象反查事件，如"牛奶"对应的事件标记完成）
+CREATE INDEX IF NOT EXISTS idx_events_ref
+    ON events (ref_type, ref_id);
+
+CREATE TRIGGER trigger_events_updated_at
+    BEFORE UPDATE ON events
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================================
+-- 8. 通知渠道表（notify_channels）
+--     存放通知适配器配置（Bark / 企业微信机器人 等），
+--     type 决定用哪个 Notifier 实现，config 为该渠道的参数。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS notify_channels (
+    id          BIGSERIAL PRIMARY KEY,
+    type        VARCHAR(30)   NOT NULL UNIQUE,       -- 渠道类型: bark / wecom_bot / console（同类型仅一条）
+    name        VARCHAR(100)  NOT NULL DEFAULT '',   -- 渠道名称（如"我的 iPhone"）
+    config      JSONB         NOT NULL DEFAULT '{}', -- 渠道参数（如 Bark 的 server + device_key）
+    enabled     BOOLEAN       NOT NULL DEFAULT FALSE, -- 是否启用
+    created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE TRIGGER trigger_notify_channels_updated_at
+    BEFORE UPDATE ON notify_channels
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================================
+-- 9. 成员维度（owner_id）
+--     为关键业务表补家庭成员维度，默认 'default'。
+--     本期只铺字段与默认值，不做权限、不做多用户登录。
+-- ============================================================
+ALTER TABLE accounts
+    ADD COLUMN IF NOT EXISTS owner_id VARCHAR(100) NOT NULL DEFAULT 'default';
+ALTER TABLE inventory
+    ADD COLUMN IF NOT EXISTS owner_id VARCHAR(100) NOT NULL DEFAULT 'default';
+ALTER TABLE chat_sessions
+    ADD COLUMN IF NOT EXISTS owner_id VARCHAR(100) NOT NULL DEFAULT 'default';
+
+-- ============================================================
+-- 10. 每日早报表（daily_reports）
+--     规则聚合 + LLM 润色 + 发送记录，一份结构贯穿推送与前端展示。
+--     report_date 唯一：同一自然日只发一次（幂等去重的落点）。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS daily_reports (
+    id            BIGSERIAL PRIMARY KEY,
+    report_date   DATE          NOT NULL UNIQUE,        -- 早报日期（自然日，Asia/Shanghai）
+    template_text TEXT          NOT NULL,               -- 规则聚合的结构化摘要（模板版）
+    polished_text TEXT,                                 -- LLM 润色稿（LLM 不可用时为空）
+    is_polished   BOOLEAN       NOT NULL DEFAULT FALSE, -- 是否成功润色
+    status        VARCHAR(20)   NOT NULL DEFAULT 'pending', -- 状态: pending / sent / failed
+    fail_reason   TEXT,                                 -- 发送失败原因（可选）
+    trigger_type  VARCHAR(20)   NOT NULL DEFAULT 'scheduled', -- 触发方式: scheduled / manual
+    data          JSONB         NOT NULL DEFAULT '{}',  -- 原始聚合数据（金额/库存数字的来源，前端可复用）
+    sent_at       TIMESTAMPTZ,                          -- 实际发送时间
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE TRIGGER trigger_daily_reports_updated_at
+    BEFORE UPDATE ON daily_reports
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================================
+-- 11. 应用设置表（app_settings）
+--     简单 KV：存早报开关/时间等应用级配置（与 Agent 人设分离）。
+--     value 为 JSONB，便于存结构化配置且免频繁改表。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS app_settings (
+    key        VARCHAR(100) PRIMARY KEY,
+    value      JSONB         NOT NULL DEFAULT '{}',
+    updated_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );

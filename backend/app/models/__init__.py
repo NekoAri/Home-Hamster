@@ -270,3 +270,24 @@ class AgentConfigResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+
+# ============================================================
+# 通知渠道相关 Schema
+# ============================================================
+
+class NotifyChannelSave(BaseModel):
+    """保存通知渠道配置请求（同 type 只保留一条）"""
+    type: str = Field(..., max_length=30, description="渠道类型: bark / console")
+    name: str = Field("", max_length=100, description="渠道名称")
+    config: dict = Field(default_factory=dict, description="渠道参数")
+    enabled: bool = Field(False, description="是否启用")
+
+
+class NotifyChannelResponse(BaseModel):
+    """通知渠道配置响应"""
+    id: int
+    type: str
+    name: str
+    config: dict
+    enabled: bool

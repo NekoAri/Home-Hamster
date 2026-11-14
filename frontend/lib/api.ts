@@ -489,3 +489,140 @@ export async function updateSessionTitle(sessionId: string, title: string): Prom
     body: JSON.stringify({ title }),
   })
 }
+
+// ============================================================
+// 每日早报 API [P1 新增]
+// ============================================================
+
+export interface DailyReport {
+  id: number
+  report_date: string
+  template_text: string
+  polished_text: string | null
+  is_polished: boolean
+  status: string // 'pending' | 'sent' | 'failed'
+  fail_reason: string | null
+  trigger_type: string // 'scheduled' | 'manual'
+  data: {
+    expired?: ReportItem[]
+    expiring?: ReportItem[]
+    low_stock?: { name: string; quantity: number; unit: string }[]
+    expense?: { this_month: number; prev_month_same_period: number }
+    events?: { kind: string; title: string; due_date: string | null }[]
+  }
+  sent_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ReportItem {
+  name: string
+  quantity: number
+  unit: string
+  location?: string
+  expiry_date: string | null
+}
+
+export interface ReportSettings {
+  enabled: boolean
+  hour: number
+  minute: number
+}
+
+export interface SendReportResult {
+  ok: boolean
+  message: string
+  text: string
+  is_polished: boolean
+  skipped: boolean
+}
+
+export async function listReports(limit: number = 30): Promise<DailyReport[]> {
+  return apiFetch(`/api/reports?limit=${limit}`)
+}
+
+export async function getLatestReport(): Promise<DailyReport | null> {
+  return apiFetch('/api/reports/latest')
+}
+
+export async function sendReportNow(): Promise<SendReportResult> {
+  return apiFetch('/api/reports/send-now', { method: 'POST' })
+}
+
+export async function getReportSettings(): Promise<ReportSettings> {
+  return apiFetch('/api/reports/settings')
+}
+
+export async function updateReportSettings(settings: ReportSettings): Promise<ReportSettings> {
+  return apiFetch('/api/reports/settings', {
+    method: 'PUT',
+    body: JSON.stringify(settings),
+  })
+}
+
+// ============================================================
+// 事件提醒 API [P2 新增]
+// ============================================================
+
+export interface HomeEvent {
+  id: number
+  kind: string // expiry / low_stock / bill / maintenance / todo
+  title: string
+  detail: string | null
+  due_at: string | null
+  remind_at: string | null
+  status: string // pending / done / snoozed / dismissed
+  ref_type: string | null
+  ref_id: number | null
+  payload: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export async function listEvents(status: string = 'pending', limit: number = 50): Promise<HomeEvent[]> {
+  return apiFetch(`/api/events?status=${encodeURIComponent(status)}&limit=${limit}`)
+}
+
+export async function completeEvent(id: number): Promise<HomeEvent> {
+  return apiFetch(`/api/events/${id}/complete`, { method: 'POST' })
+}
+
+export async function snoozeEvent(id: number, hours: number = 24): Promise<HomeEvent> {
+  return apiFetch(`/api/events/${id}/snooze`, {
+    method: 'POST',
+    body: JSON.stringify({ hours }),
+  })
+}
+
+export async function dismissEvent(id: number): Promise<HomeEvent> {
+  return apiFetch(`/api/events/${id}/dismiss`, { method: 'POST' })
+}
+
+// ============================================================
+// 记忆管理 API [P3 新增]
+// ============================================================
+
+export interface AgentMemory {
+  id: number
+  user_id: string
+  memory_type: string // preference / fact / habit
+  content: string
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export async function listMemories(memoryType: string = '', limit: number = 200): Promise<AgentMemory[]> {
+  return apiFetch(`/api/memories?memory_type=${encodeURIComponent(memoryType)}&limit=${limit}`)
+}
+
+export async function updateMemory(id: number, content: string): Promise<AgentMemory> {
+  return apiFetch(`/api/memories/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ content }),
+  })
+}
+
+export async function deleteMemory(id: number): Promise<{ message: string }> {
+  return apiFetch(`/api/memories/${id}`, { method: 'DELETE' })
+}

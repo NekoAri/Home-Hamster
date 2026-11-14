@@ -510,6 +510,21 @@ async def consume_inventory(
             await crud.update_inventory(conn, existing["id"], quantity=new_qty)
             logger.info(f"consume_inventory: {name} {old_qty} → {new_qty} | {note}")
 
+            # 顺带解决该物品的待处理提醒（用户已经处理了物品本身）
+            try:
+                ev_rows = await conn.fetch(
+                    "SELECT id, title FROM events "
+                    "WHERE ref_type = 'inventory' AND ref_id = $1 "
+                    "AND status IN ('pending', 'snoozed')",
+                    existing["id"],
+                )
+                for ev in ev_rows:
+                    await crud.set_event_status(conn, ev["id"], "done")
+                if ev_rows:
+                    logger.info(f"consume_inventory: 已自动完成 {len(ev_rows)} 条相关提醒")
+            except Exception as ev_err:
+                logger.warning(f"consume_inventory 自动完成提醒失败（不影响库存扣减）: {ev_err}")
+
             used_unit = unit or existing["unit"]
             msg = (
                 f"✅ 已领用：{name} {abs(quantity)}{used_unit}"
@@ -523,6 +538,64 @@ async def consume_inventory(
     except Exception as e:
         logger.error(f"consume_inventory 失败: {e}")
         return f"❌ 领用库存失败: {str(e)}"
+
+
+async def complete_event(name: str, note: str = "") -> str:
+    """
+    把用户口头确认的事项（如"牛奶喝了"、"纸巾补过了"）对应到待处理事件并标记完成。
+    先按物品名找库存关联事件，再按标题模糊匹配兜底。
+    """
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            matched = []
+            # 1) 物品名精确关联：inventory 事件的 ref_id 指向同名物品
+            item = await crud.get_inventory_by_name(conn, name)
+            if item:
+                rows = await conn.fetch(
+                    """
+                    SELECT * FROM events
+                    WHERE ref_type = 'inventory' AND ref_id = $1
+                      AND status IN ('pending', 'snoozed')
+                    """,
+                    item["id"],
+                )
+                matched.extend(dict(r) for r in rows)
+
+            # 2) 标题模糊匹配兜底（如交费/待办类事件）
+            if not matched:
+                rows = await conn.fetch(
+                    """
+                    SELECT * FROM events
+                    WHERE status IN ('pending', 'snoozed')
+                      AND title ILIKE '%' || $1 || '%'
+                    LIMIT 5
+                    """,
+                    name,
+                )
+                matched.extend(dict(r) for r in rows)
+
+            if not matched:
+                return (
+                    f"ℹ️ 没有找到与「{name}」相关的待处理提醒。"
+                    "相关事项可能已经完成或被忽略。"
+                )
+
+            done = 0
+            titles = []
+            for e in matched:
+                await crud.set_event_status(conn, e["id"], "done")
+                done += 1
+                titles.append(e["title"])
+
+            logger.info(f"complete_event: 「{name}」→ 完成 {done} 条事件: {titles}")
+            msg = f"✅ 已完成 {done} 条提醒：{'、'.join(titles)}"
+            if note:
+                msg += f"（{note}）"
+            return msg
+    except Exception as e:
+        logger.error(f"complete_event 失败: {e}")
+        return f"❌ 标记完成失败: {str(e)}"
 
 
 # ============================================================
@@ -775,6 +848,27 @@ TOOLS_DEFINITION_OPENAI = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "complete_event",
+            "description": "把用户口头确认的提醒事项标记完成。当用户说某件事已经做了/喝完了/补货了/处理掉了，而系统里有对应提醒时调用，如'牛奶喝了'、'水费交过了'、'纸巾补了'。只负责把提醒标记完成；如果用户同时说明了消耗数量，先用 consume_inventory 减库存，再用此工具完成提醒。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "事项/物品关键词，如：牛奶、水费、纸巾",
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "补充说明（可选）",
+                    },
+                },
+                "required": ["name"],
+            },
+        },
+    },
 ]
 
 
@@ -788,6 +882,7 @@ TOOL_FUNCTIONS = {
     "add_inventory": add_inventory,
     "consume_inventory": consume_inventory,
     "inventory_type": inventory_type,
+    "complete_event": complete_event,
 }
 
 
@@ -808,6 +903,7 @@ INVENTORY_TOOL_NAMES = (
     "consume_inventory",
     "check_inventory",
     "inventory_type",
+    "complete_event",
 )
 
 

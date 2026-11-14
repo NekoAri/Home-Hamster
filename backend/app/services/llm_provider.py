@@ -98,10 +98,12 @@ class LLMProvider(ABC):
     async def chat_stream(
         self,
         messages: list[dict],
+        extra_body: Optional[dict] = None,
     ) -> AsyncGenerator[str, None]:
         """
         发送对话请求（流式输出），逐 token 返回文本
         不携带工具定义，用于工具执行后的最终回复
+        extra_body: 附加请求参数（如 {"reasoning_effort": "none"} 关闭推理模型思考链）
         """
         ...
 
@@ -237,6 +239,7 @@ class OpenAICompatibleProvider(LLMProvider):
     async def chat_stream(
         self,
         messages: list[dict],
+        extra_body: Optional[dict] = None,
     ) -> AsyncGenerator[str, None]:
         """使用 OpenAI 接口流式输出（推理模型 yield None 保持心跳）"""
         client = self._get_client()
@@ -246,6 +249,7 @@ class OpenAICompatibleProvider(LLMProvider):
             stream=True,
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
+            extra_body=extra_body,
         )
 
         async for chunk in stream:
@@ -478,8 +482,9 @@ class AnthropicProvider(LLMProvider):
     async def chat_stream(
         self,
         messages: list[dict],
+        extra_body: Optional[dict] = None,
     ) -> AsyncGenerator[str, None]:
-        """使用 Anthropic 接口流式输出"""
+        """使用 Anthropic 接口流式输出（extra_body 忽略：Anthropic 无此参数）"""
         client = self._get_client()
         system_prompt, converted_messages = self._convert_messages_to_anthropic(messages)
 
@@ -576,3 +581,40 @@ def create_provider(config: LLMConfig) -> LLMProvider:
             f"支持的类型: {list(PROVIDER_CLASSES.keys())}"
         )
     return provider_class(config)
+
+
+# ============================================================
+# 嵌入向量（P3 记忆系统）
+# ============================================================
+
+async def embed_texts(
+    texts: list[str],
+    config: LLMConfig,
+) -> Optional[list[list[float]]]:
+    """
+    用配置中的 embedding_model 生成文本向量。
+
+    - 仅支持 OpenAI 兼容接口（openai/ollama/deepseek/zhipu/custom 等）
+    - Anthropic 不提供 embeddings 接口，直接返回 None
+    - 未配置 embedding_model 返回 None
+    - 任何异常由调用方捕获处理，这里只抛出
+    """
+    if not config.embedding_model:
+        return None
+    if config.provider == "anthropic":
+        return None
+
+    from openai import AsyncOpenAI
+
+    base_url = config.base_url
+    is_local = config.provider in ("ollama", "custom") or (
+        base_url and ("localhost" in base_url or "192.168." in base_url or "127.0.0.1" in base_url)
+    )
+    client = AsyncOpenAI(
+        api_key=config.api_key or "dummy",
+        base_url=base_url if base_url else None,
+        timeout=120.0 if is_local else 30.0,
+        max_retries=1,
+    )
+    response = await client.embeddings.create(model=config.embedding_model, input=texts)
+    return [item.embedding for item in response.data]

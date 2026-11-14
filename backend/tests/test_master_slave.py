@@ -365,7 +365,9 @@ def test_prompt_and_tool_scope() -> None:
     inventory_names = {t["function"]["name"] for t in InventoryAgent.tools}
 
     assert bookkeeping_names == {"add_expense", "check_expense", "list_ledgers"}
-    assert inventory_names == {"add_inventory", "consume_inventory", "check_inventory", "inventory_type"}
+    assert inventory_names == {
+        "add_inventory", "consume_inventory", "check_inventory", "inventory_type", "complete_event",
+    }
     assert not (bookkeeping_names & inventory_names), "两个子 Agent 的工具不应重叠"
     print("✅ 6. 提示词花名册 + 工具作用域隔离正常")
 

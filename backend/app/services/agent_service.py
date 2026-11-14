@@ -130,6 +130,15 @@ async def chat_stream(
         return
 
     system_prompt = manager.get_system_prompt()
+    # ---- 记忆注入（P3）：按用户消息检索长期记忆，拼成独立段落（失败不影响对话） ----
+    try:
+        from app.services.memory_service import build_prompt_section
+        memory_section = await build_prompt_section(content)
+        if memory_section:
+            system_prompt = system_prompt + memory_section
+            logger.info(f"🧠 已注入 {memory_section.count('- [')} 条相关记忆")
+    except Exception as e:
+        logger.warning(f"记忆注入失败（跳过）: {e}")
     tools = orchestrator.get_tools()
     sub_providers = manager.get_sub_providers()  # 每个子 Agent 可绑定独立模型
 
@@ -264,6 +273,13 @@ async def chat_stream(
             content=assistant_content,
             tool_calls=dispatch_calls or None,
         )
+
+    # ---- 第 5.5 步：后台抽取长期记忆（P3，fire-and-forget，失败不影响对话） ----
+    try:
+        from app.services.memory_service import spawn_extraction
+        spawn_extraction(session_id, content, assistant_content)
+    except Exception as e:
+        logger.warning(f"记忆抽取任务启动失败（跳过）: {e}")
 
     # ---- 第 6 步：检查是否需要生成历史摘要 ----
     yield HEARTBEAT
